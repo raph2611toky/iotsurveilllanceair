@@ -1,257 +1,692 @@
-// EditorCanvas.jsx
-// Canvas principal : drag-and-drop, déplacement, câblage, zoom
-
-import { useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { componentsData } from "../data/componentsData";
 import ComponentVisual from "./ComponentVisual";
 
-// Choisit la couleur du fil selon les noms de pins
+const WORLD_WIDTH = 3200;
+const WORLD_HEIGHT = 2200;
+
 function chooseWireColor(fromPin, toPin, fallbackColor) {
   const text = `${fromPin} ${toPin}`.toUpperCase();
-  if (text.includes("GND"))           return "#222222";
-  if (text.includes("5V") || text.includes("VCC") || text.includes("+5V")) return "#ff0000";
-  if (text.includes("3.3V"))          return "#ff7a30";
-  if (text.includes("SDA") || text.includes("DATA")) return "#0055ff";
-  if (text.includes("SCL"))           return "#00aa00";
-  if (text.includes("TX"))            return "#aa00ff";
-  if (text.includes("RX"))            return "#ff00aa";
-  if (text.includes("AOUT"))          return "#00aaff";
-  if (text.includes("DOUT"))          return "#ffaa00";
-  if (text.includes("IN"))            return "#ff8800";
+
+  if (text.includes("GND") || text.includes("−")) return "#222222";
+  if (text.includes("5V") || text.includes("VCC") || text.includes("+")) return "#ff0000";
+  if (text.includes("3.3V") || text.includes("3V3")) return "#ff7a30";
+  if (text.includes("SDA") || text.includes("DATA") || text.includes("SIG")) return "#0055ff";
+  if (text.includes("SCL")) return "#00aa00";
+  if (text.includes("TX")) return "#aa00ff";
+  if (text.includes("RX")) return "#ff00aa";
+  if (text.includes("AOUT") || text.includes("A0")) return "#00aaff";
+  if (text.includes("DOUT") || text.includes("D0")) return "#ffaa00";
+  if (text.includes("IN")) return "#ff8800";
+  if (text.includes("OUT")) return "#00ccaa";
+
   return fallbackColor || "#c9a227";
 }
 
-function EditorCanvas({
+function makePinKey(pinRef) {
+  return `${pinRef.itemId}:${pinRef.pinName}`;
+}
+
+function makeWirePath(points) {
+  if (points.length < 2) return "";
+
+  if (points.length === 2) {
+    const [from, to] = points;
+    const dx = Math.abs(to.x - from.x);
+    const c1 = { x: from.x + dx * 0.35, y: from.y };
+    const c2 = { x: to.x - dx * 0.35, y: to.y };
+
+    return `M ${from.x} ${from.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${to.x} ${to.y}`;
+  }
+
+  let path = `M ${points[0].x} ${points[0].y}`;
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+
+    const mid = {
+      x: (current.x + next.x) / 2,
+      y: (current.y + next.y) / 2,
+    };
+
+    path += ` Q ${current.x} ${current.y}, ${mid.x} ${mid.y}`;
+  }
+
+  const beforeLast = points[points.length - 2];
+  const last = points[points.length - 1];
+
+  path += ` Q ${beforeLast.x} ${beforeLast.y}, ${last.x} ${last.y}`;
+
+  return path;
+}
+
+function createFlexiblePoints(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const curve = Math.min(90, Math.max(35, distance * 0.14));
+
+  return [
+    {
+      x: from.x + dx * 0.33,
+      y: from.y + dy * 0.33 - curve,
+    },
+    {
+      x: from.x + dx * 0.66,
+      y: from.y + dy * 0.66 + curve,
+    },
+  ];
+}
+
+function isLeftButton(event) {
+  return event.button === 0;
+}
+
+function isRightButton(event) {
+  return event.button === 2;
+}
+
+export default function EditorCanvas({
   items,
   setItems,
   wires,
   setWires,
   selectedId,
   setSelectedId,
-  wireMode,
-  pendingPin,
-  setPendingPin,
   running,
   sensorData,
   zoom,
 }) {
   const canvasRef = useRef(null);
+  const rightClickMemory = useRef({ wireId: null, time: 0 });
+
   const scale = zoom / 100;
 
-  // ── Drop depuis la sidebar ────────────────────────────────────────────────
+  const [hoveredPin, setHoveredPin] = useState(null);
+  const [draftWire, setDraftWire] = useState(null);
+  const [draggingWireId, setDraggingWireId] = useState(null);
+  const [draggingPoint, setDraggingPoint] = useState(null);
+  const [rewiring, setRewiring] = useState(null);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  const usedPinKeys = useMemo(() => {
+    const keys = new Set();
+
+    wires.forEach((wire) => {
+      keys.add(makePinKey(wire.from));
+      keys.add(makePinKey(wire.to));
+    });
+
+    return keys;
+  }, [wires]);
+
+  function getCanvasPoint(event) {
+    const rect = canvasRef.current.getBoundingClientRect();
+
+    return {
+      x: (event.clientX - rect.left - pan.x) / scale,
+      y: (event.clientY - rect.top - pan.y) / scale,
+    };
+  }
+
+  function makePinRef(item, pin) {
+    return {
+      itemId: item.id,
+      itemType: item.type,
+      pinName: pin.name,
+      label: pin.label || pin.name,
+      x: item.x + pin.x,
+      y: item.y + pin.y,
+      color: pin.color,
+    };
+  }
+
+  function resolvePin(pinRef) {
+    const item = items.find((current) => current.id === pinRef.itemId);
+    if (!item) return pinRef;
+
+    const component = componentsData[item.type];
+    const pin = component?.pins?.find(
+      (currentPin) => currentPin.name === pinRef.pinName
+    );
+
+    if (!pin) return pinRef;
+
+    return {
+      ...pinRef,
+      x: item.x + pin.x,
+      y: item.y + pin.y,
+      label: pin.label || pin.name,
+      color: pin.color,
+    };
+  }
+
   function handleDrop(event) {
     event.preventDefault();
-    const componentType = event.dataTransfer.getData("componentType");
+
+    const componentType =
+      event.dataTransfer.getData("componentType") ||
+      event.dataTransfer.getData("comp");
+
     if (!componentType || !componentsData[componentType]) return;
 
     const component = componentsData[componentType];
-    const rect = canvasRef.current.getBoundingClientRect();
+    const point = getCanvasPoint(event);
 
     const newItem = {
-      id:   `${componentType}-${Date.now()}`,
+      id: `${componentType}-${Date.now()}`,
       type: componentType,
-      x:    (event.clientX - rect.left) / scale - component.width  / 2,
-      y:    (event.clientY - rect.top)  / scale - component.height / 2,
+      x: point.x - component.width / 2,
+      y: point.y - component.height / 2,
     };
 
-    setItems((prev) => [...prev, newItem]);
+    setItems((previous) => [...previous, newItem]);
     setSelectedId(newItem.id);
   }
 
-  // ── Déplacement d'un composant ────────────────────────────────────────────
-  function startMove(event, itemId) {
-    if (wireMode) return;
+  function startMoveItem(event, itemId) {
+    if (!isLeftButton(event)) return;
+
+    if (
+      event.target.classList.contains("pin") ||
+      event.target.classList.contains("delete-btn")
+    ) {
+      return;
+    }
+
+    event.preventDefault();
     event.stopPropagation();
 
-    const startX = event.clientX;
-    const startY = event.clientY;
-    const current = items.find((i) => i.id === itemId);
+    const startPoint = getCanvasPoint(event);
+    const current = items.find((item) => item.id === itemId);
     if (!current) return;
 
-    function onMove(e) {
-      const dx = (e.clientX - startX) / scale;
-      const dy = (e.clientY - startY) / scale;
-      setItems((prev) =>
-        prev.map((i) =>
-          i.id === itemId ? { ...i, x: current.x + dx, y: current.y + dy } : i
+    function onMove(moveEvent) {
+      const movePoint = getCanvasPoint(moveEvent);
+      const dx = movePoint.x - startPoint.x;
+      const dy = movePoint.y - startPoint.y;
+
+      setItems((previous) =>
+        previous.map((item) =>
+          item.id === itemId
+            ? {
+                ...item,
+                x: current.x + dx,
+                y: current.y + dy,
+              }
+            : item
         )
       );
     }
 
     function onUp() {
       window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup",   onUp);
+      window.removeEventListener("mouseup", onUp);
     }
 
     window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup",   onUp);
+    window.addEventListener("mouseup", onUp);
   }
 
-  // ── Clic sur une pin pour câbler ──────────────────────────────────────────
-  function handlePinClick(item, pin) {
-    if (!wireMode) return;
+  function startPanCanvas(event) {
+    if (!isLeftButton(event)) return;
 
-    const clicked = {
-      itemId:   item.id,
-      itemType: item.type,
-      pinName:  pin.name,
-      x: item.x + pin.x,
-      y: item.y + pin.y,
-      color: pin.color,
-    };
+    const isCanvas =
+      event.target === canvasRef.current ||
+      event.target.classList.contains("canvas-grid");
 
-    if (!pendingPin) {
-      setPendingPin(clicked);
+    if (!isCanvas) return;
+
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const initialPan = { ...pan };
+
+    function onMove(moveEvent) {
+      setPan({
+        x: initialPan.x + (moveEvent.clientX - startX),
+        y: initialPan.y + (moveEvent.clientY - startY),
+      });
+    }
+
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function startWireFromPin(item, pin, event) {
+    if (!isLeftButton(event)) return;
+
+    const from = makePinRef(item, pin);
+    const fromKey = makePinKey(from);
+
+    if (usedPinKeys.has(fromKey)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const point = getCanvasPoint(event);
+
+    setDraftWire({
+      from,
+      to: point,
+    });
+
+    function onMove(moveEvent) {
+      const movePoint = getCanvasPoint(moveEvent);
+
+      setDraftWire((previous) => {
+        if (!previous) return null;
+
+        return {
+          ...previous,
+          to: movePoint,
+        };
+      });
+    }
+
+    function onUp() {
+      setDraftWire((currentDraft) => {
+        if (!currentDraft) return null;
+
+        setHoveredPin((currentHovered) => {
+          if (!currentHovered) return currentHovered;
+
+          const toKey = makePinKey(currentHovered);
+          const fromDraftKey = makePinKey(currentDraft.from);
+
+          const samePin = toKey === fromDraftKey;
+          const targetAlreadyUsed = usedPinKeys.has(toKey);
+          const sourceAlreadyUsed = usedPinKeys.has(fromDraftKey);
+
+          if (!samePin && !targetAlreadyUsed && !sourceAlreadyUsed) {
+            const to = currentHovered;
+
+            const color = chooseWireColor(
+              currentDraft.from.pinName,
+              to.pinName,
+              to.color
+            );
+
+            const newWire = {
+              id: `wire-${Date.now()}`,
+              from: currentDraft.from,
+              to,
+              color,
+              points: createFlexiblePoints(currentDraft.from, to),
+            };
+
+            setWires((previous) => [...previous, newWire]);
+          }
+
+          return currentHovered;
+        });
+
+        return null;
+      });
+
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function startRewireEndpoint(event, wire, endpoint) {
+    if (!isLeftButton(event)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const fixedPin = endpoint === "from" ? resolvePin(wire.to) : resolvePin(wire.from);
+    const movingPin = endpoint === "from" ? resolvePin(wire.from) : resolvePin(wire.to);
+
+    setRewiring({
+      wireId: wire.id,
+      endpoint,
+      fixedPin,
+      movingPin,
+      cursor: movingPin,
+      color: wire.color,
+    });
+
+    function onMove(moveEvent) {
+      const movePoint = getCanvasPoint(moveEvent);
+
+      setRewiring((previous) => {
+        if (!previous) return null;
+
+        return {
+          ...previous,
+          cursor: movePoint,
+        };
+      });
+    }
+
+    function onUp() {
+      setRewiring((currentRewire) => {
+        if (!currentRewire) return null;
+
+        setHoveredPin((currentHovered) => {
+          if (!currentHovered) return currentHovered;
+
+          const targetKey = makePinKey(currentHovered);
+          const fixedKey = makePinKey(currentRewire.fixedPin);
+
+          const pinUsedByOtherWire = wires.some((currentWire) => {
+            if (currentWire.id === currentRewire.wireId) return false;
+
+            return (
+              makePinKey(currentWire.from) === targetKey ||
+              makePinKey(currentWire.to) === targetKey
+            );
+          });
+
+          if (targetKey !== fixedKey && !pinUsedByOtherWire) {
+            setWires((previous) =>
+              previous.map((currentWire) => {
+                if (currentWire.id !== currentRewire.wireId) return currentWire;
+
+                const newFrom =
+                  currentRewire.endpoint === "from"
+                    ? currentHovered
+                    : currentWire.from;
+
+                const newTo =
+                  currentRewire.endpoint === "to"
+                    ? currentHovered
+                    : currentWire.to;
+
+                return {
+                  ...currentWire,
+                  from: newFrom,
+                  to: newTo,
+                  color: chooseWireColor(
+                    newFrom.pinName,
+                    newTo.pinName,
+                    currentWire.color
+                  ),
+                  points: currentWire.points || createFlexiblePoints(newFrom, newTo),
+                };
+              })
+            );
+          }
+
+          return currentHovered;
+        });
+
+        return null;
+      });
+
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function handlePinMouseEnter(item, pin) {
+    setHoveredPin(makePinRef(item, pin));
+  }
+
+  function handlePinMouseLeave(item, pin) {
+    setHoveredPin((current) => {
+      if (!current) return null;
+
+      if (current.itemId === item.id && current.pinName === pin.name) {
+        return null;
+      }
+
+      return current;
+    });
+  }
+
+  function deleteWire(wireId) {
+    setWires((previous) => previous.filter((wire) => wire.id !== wireId));
+  }
+
+  function handleWireRightDoubleClick(event, wireId) {
+    if (!isRightButton(event)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const now = Date.now();
+    const last = rightClickMemory.current;
+
+    if (last.wireId === wireId && now - last.time <= 450) {
+      deleteWire(wireId);
+      rightClickMemory.current = { wireId: null, time: 0 };
       return;
     }
 
-    // Même composant → annuler
-    if (pendingPin.itemId === clicked.itemId) {
-      setPendingPin(null);
-      return;
+    rightClickMemory.current = { wireId, time: now };
+  }
+
+  function startMoveWholeWire(event, wire) {
+    if (!isLeftButton(event)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startPoint = getCanvasPoint(event);
+    const initialPoints = wire.points || [];
+
+    setDraggingWireId(wire.id);
+
+    function onMove(moveEvent) {
+      const movePoint = getCanvasPoint(moveEvent);
+      const dx = movePoint.x - startPoint.x;
+      const dy = movePoint.y - startPoint.y;
+
+      setWires((previous) =>
+        previous.map((currentWire) =>
+          currentWire.id === wire.id
+            ? {
+                ...currentWire,
+                points: initialPoints.map((point) => ({
+                  x: point.x + dx,
+                  y: point.y + dy,
+                })),
+              }
+            : currentWire
+        )
+      );
     }
 
-    const color = chooseWireColor(pendingPin.pinName, clicked.pinName, clicked.color);
+    function onUp() {
+      setDraggingWireId(null);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
 
-    setWires((prev) => [
-      ...prev,
-      {
-        id:    `wire-${Date.now()}`,
-        from:  pendingPin,
-        to:    clicked,
-        color,
-      },
-    ]);
-    setPendingPin(null);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 
-  // ── Résoudre la position actuelle d'une pin (après déplacement) ───────────
-  function resolvePin(pinRef) {
-    const item = items.find((i) => i.id === pinRef.itemId);
-    if (!item) return pinRef;
-    const comp = componentsData[item.type];
-    const pin  = comp?.pins.find((p) => p.name === pinRef.pinName);
-    if (!pin) return pinRef;
-    return { ...pinRef, x: item.x + pin.x, y: item.y + pin.y };
+  function startMoveWirePoint(event, wire, pointIndex) {
+    if (!isLeftButton(event)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startPoint = getCanvasPoint(event);
+    const initialPoint = wire.points[pointIndex];
+
+    setDraggingPoint({
+      wireId: wire.id,
+      pointIndex,
+    });
+
+    function onMove(moveEvent) {
+      const movePoint = getCanvasPoint(moveEvent);
+      const dx = movePoint.x - startPoint.x;
+      const dy = movePoint.y - startPoint.y;
+
+      setWires((previous) =>
+        previous.map((currentWire) => {
+          if (currentWire.id !== wire.id) return currentWire;
+
+          const points = [...(currentWire.points || [])];
+
+          points[pointIndex] = {
+            x: initialPoint.x + dx,
+            y: initialPoint.y + dy,
+          };
+
+          return {
+            ...currentWire,
+            points,
+          };
+        })
+      );
+    }
+
+    function onUp() {
+      setDraggingPoint(null);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
   }
 
-  // ── Supprimer composant sélectionné ──────────────────────────────────────
-  function deleteSelected(id) {
-    setItems((prev) => prev.filter((i) => i.id !== id));
-    setWires((prev) =>
-      prev.filter((w) => w.from.itemId !== id && w.to.itemId !== id)
+  function addPointOnWire(event, wire) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const point = getCanvasPoint(event);
+
+    setWires((previous) =>
+      previous.map((currentWire) => {
+        if (currentWire.id !== wire.id) return currentWire;
+
+        return {
+          ...currentWire,
+          points: [...(currentWire.points || []), point],
+        };
+      })
     );
-    setSelectedId(null);
-    setPendingPin(null);
   }
 
-  // ── Clic canvas vide → désélectionner ────────────────────────────────────
-  function handleCanvasClick(e) {
-    if (e.target === canvasRef.current || e.target.classList.contains("canvas-grid")) {
+  function deleteSelected(id) {
+    setItems((previous) => previous.filter((item) => item.id !== id));
+
+    setWires((previous) =>
+      previous.filter((wire) => wire.from.itemId !== id && wire.to.itemId !== id)
+    );
+
+    setSelectedId(null);
+  }
+
+  function handleCanvasClick(event) {
+    const isCanvas =
+      event.target === canvasRef.current ||
+      event.target.classList.contains("canvas-grid");
+
+    if (isCanvas) {
       setSelectedId(null);
-      if (!wireMode) setPendingPin(null);
     }
   }
+
+  const transformStyle = {
+    width: WORLD_WIDTH,
+    height: WORLD_HEIGHT,
+    transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+    transformOrigin: "top left",
+  };
 
   return (
     <main
       ref={canvasRef}
-      className={`canvas${wireMode ? " wire-mode" : ""}`}
+      className="canvas"
       onDrop={handleDrop}
-      onDragOver={(e) => e.preventDefault()}
+      onDragOver={(event) => event.preventDefault()}
+      onMouseDown={startPanCanvas}
       onClick={handleCanvasClick}
+      onContextMenu={(event) => event.preventDefault()}
     >
-      {/* Grille de fond */}
-      <div className="canvas-grid" />
+      <div
+        className="canvas-grid"
+        style={{
+          backgroundPosition: `${pan.x}px ${pan.y}px`,
+        }}
+      />
 
-      {/* Écran vide */}
       {items.length === 0 && (
         <div className="empty-canvas">
-          <div className="empty-icon">⚡</div>
+          <div className="empty-icon">+</div>
           <strong>Glisse les composants ici</strong>
-          <span>Raspberry Pi 5, capteurs, breadboard, alimentation…</span>
+          <span>Raspberry Pi 5, capteurs, breadboard, alimentation...</span>
         </div>
       )}
 
-      {/* ── Couche SVG : fils ── */}
-      <svg
-        className="wire-svg"
-        style={{ transform: `scale(${scale})`, transformOrigin: "top left" }}
-      >
-        {wires.map((wire) => {
-          const from = resolvePin(wire.from);
-          const to   = resolvePin(wire.to);
-          const midY = (from.y + to.y) / 2;
-
-          return (
-            <g key={wire.id}>
-              {/* Fil en courbe de Bézier */}
-              <path
-                d={`M ${from.x} ${from.y} C ${from.x} ${midY}, ${to.x} ${midY}, ${to.x} ${to.y}`}
-                stroke={wire.color}
-                strokeWidth={3.5}
-                fill="none"
-                strokeLinecap="round"
-                opacity={0.88}
-              />
-              {/* Pastilles aux extrémités */}
-              <circle cx={from.x} cy={from.y} r={5} fill={wire.color} />
-              <circle cx={to.x}   cy={to.y}   r={5} fill={wire.color} />
-              {/* Étiquette pin */}
-              <text
-                x={(from.x + to.x) / 2}
-                y={(from.y + to.y) / 2 - 6}
-                textAnchor="middle"
-                fontSize={8}
-                fontWeight={700}
-                fontFamily="monospace"
-                fill={wire.color}
-                opacity={0.8}
-              >
-                {wire.from.pinName}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-
-      {/* ── Composants placés ── */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          transform: `scale(${scale})`,
-          transformOrigin: "top left",
-        }}
-      >
+      <div className="canvas-layer" style={transformStyle}>
         {items.map((item) => {
-          const comp = componentsData[item.type];
-          if (!comp) return null;
-          const isSelected = selectedId === item.id;
+          const component = componentsData[item.type];
+          if (!component) return null;
+
+          const disabledPinNames = new Set();
+
+          component.pins?.forEach((pin) => {
+            const pinKey = `${item.id}:${pin.name}`;
+
+            const usedByThisRewiring =
+              rewiring &&
+              rewiring.wireId &&
+              wires.some((wire) => {
+                if (wire.id !== rewiring.wireId) return false;
+
+                if (rewiring.endpoint === "from") {
+                  return makePinKey(wire.from) === pinKey;
+                }
+
+                if (rewiring.endpoint === "to") {
+                  return makePinKey(wire.to) === pinKey;
+                }
+
+                return false;
+              });
+
+            if (usedPinKeys.has(pinKey) && !usedByThisRewiring) {
+              disabledPinNames.add(pin.name);
+            }
+          });
 
           return (
             <div
               key={item.id}
-              className={`placed${isSelected ? " selected" : ""}`}
+              className={selectedId === item.id ? "placed selected" : "placed"}
               style={{
-                left:   item.x,
-                top:    item.y,
-                width:  comp.width,
-                height: comp.height,
+                left: item.x,
+                top: item.y,
+                width: component.width,
+                height: component.height,
               }}
-              onMouseDown={(e) => {
-                e.stopPropagation();
+              onMouseDown={(event) => {
                 setSelectedId(item.id);
-                startMove(e, item.id);
+                startMoveItem(event, item.id);
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelectedId(item.id);
               }}
             >
-              {/* Bouton supprimer */}
-              {isSelected && (
+              {selectedId === item.id && (
                 <button
                   className="delete-btn"
-                  title="Supprimer ce composant"
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
                     deleteSelected(item.id);
                   }}
                 >
@@ -259,10 +694,14 @@ function EditorCanvas({
                 </button>
               )}
 
-              {/* Visuel du composant */}
               <ComponentVisual
-                component={comp}
-                onPinClick={(pin) => handlePinClick(item, pin)}
+                component={component}
+                disabledPinNames={disabledPinNames}
+                onPinMouseDown={(pin, event) =>
+                  startWireFromPin(item, pin, event)
+                }
+                onPinMouseEnter={(pin) => handlePinMouseEnter(item, pin)}
+                onPinMouseLeave={(pin) => handlePinMouseLeave(item, pin)}
                 running={running}
                 sensorData={sensorData}
               />
@@ -271,27 +710,161 @@ function EditorCanvas({
         })}
       </div>
 
-      {/* ── Info pin en attente de câblage ── */}
-      {pendingPin && (
-        <div className="pending-pin-info">
-          🔌 Pin sélectionnée :{" "}
-          <strong style={{ color: pendingPin.color }}>{pendingPin.pinName}</strong>
-          {" "}— Cliquez sur une autre pin pour tracer le fil
-        </div>
-      )}
+      <svg className="wire-svg" style={transformStyle}>
+        {wires.map((wire) => {
+          const from = resolvePin(wire.from);
+          const to = resolvePin(wire.to);
+          const points = [from, ...(wire.points || []), to];
+          const path = makeWirePath(points);
 
-      {/* ── Barre de zoom (affichée en bas au centre) ── */}
-      <div className="zoom-bar">
-        <button onClick={() => {}} title="Zoom −" onMouseDown={(e) => { e.stopPropagation(); }}>
-          −
-        </button>
-        <span>{zoom}%</span>
-        <button onClick={() => {}} title="Zoom +" onMouseDown={(e) => { e.stopPropagation(); }}>
-          +
-        </button>
-      </div>
+          return (
+            <g
+              key={wire.id}
+              className={
+                draggingWireId === wire.id
+                  ? "wire-group moving"
+                  : "wire-group"
+              }
+            >
+              <path
+                d={path}
+                stroke="transparent"
+                strokeWidth="26"
+                fill="none"
+                className="wire-hit-area"
+                onMouseDown={(event) => startMoveWholeWire(event, wire)}
+                onDoubleClick={(event) => addPointOnWire(event, wire)}
+                onContextMenu={(event) => handleWireRightDoubleClick(event, wire.id)}
+              />
+
+              <path
+                d={path}
+                stroke={wire.color}
+                strokeWidth="5"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="wire-path"
+                onMouseDown={(event) => startMoveWholeWire(event, wire)}
+                onDoubleClick={(event) => addPointOnWire(event, wire)}
+                onContextMenu={(event) => handleWireRightDoubleClick(event, wire.id)}
+              />
+
+              <circle
+                cx={from.x}
+                cy={from.y}
+                r="7"
+                fill={wire.color}
+                className="wire-endpoint"
+                onMouseDown={(event) => startRewireEndpoint(event, wire, "from")}
+                onContextMenu={(event) => handleWireRightDoubleClick(event, wire.id)}
+              />
+
+              <circle
+                cx={to.x}
+                cy={to.y}
+                r="7"
+                fill={wire.color}
+                className="wire-endpoint"
+                onMouseDown={(event) => startRewireEndpoint(event, wire, "to")}
+                onContextMenu={(event) => handleWireRightDoubleClick(event, wire.id)}
+              />
+
+              {(wire.points || []).map((point, index) => (
+                <circle
+                  key={`${wire.id}-point-${index}`}
+                  cx={point.x}
+                  cy={point.y}
+                  r={
+                    draggingPoint?.wireId === wire.id &&
+                    draggingPoint?.pointIndex === index
+                      ? 8
+                      : 6
+                  }
+                  fill="#fffdf5"
+                  stroke={wire.color}
+                  strokeWidth="2.5"
+                  className="wire-point"
+                  onMouseDown={(event) =>
+                    startMoveWirePoint(event, wire, index)
+                  }
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    setWires((previous) =>
+                      previous.map((currentWire) => {
+                        if (currentWire.id !== wire.id) return currentWire;
+
+                        return {
+                          ...currentWire,
+                          points: currentWire.points.filter(
+                            (_, pointIndex) => pointIndex !== index
+                          ),
+                        };
+                      })
+                    );
+                  }}
+                />
+              ))}
+            </g>
+          );
+        })}
+
+        {draftWire && (
+          <g className="wire-preview">
+            <path
+              d={makeWirePath([draftWire.from, draftWire.to])}
+              stroke={draftWire.from.color || "#c9a227"}
+              strokeWidth="4"
+              fill="none"
+              strokeLinecap="round"
+              strokeDasharray="8 6"
+            />
+
+            <circle
+              cx={draftWire.from.x}
+              cy={draftWire.from.y}
+              r="5"
+              fill={draftWire.from.color || "#c9a227"}
+            />
+
+            <circle
+              cx={draftWire.to.x}
+              cy={draftWire.to.y}
+              r="5"
+              fill={draftWire.from.color || "#c9a227"}
+            />
+          </g>
+        )}
+
+        {rewiring && (
+          <g className="wire-preview">
+            <path
+              d={makeWirePath([rewiring.fixedPin, rewiring.cursor])}
+              stroke={rewiring.color || "#c9a227"}
+              strokeWidth="4"
+              fill="none"
+              strokeLinecap="round"
+              strokeDasharray="8 6"
+            />
+
+            <circle
+              cx={rewiring.fixedPin.x}
+              cy={rewiring.fixedPin.y}
+              r="5"
+              fill={rewiring.color || "#c9a227"}
+            />
+
+            <circle
+              cx={rewiring.cursor.x}
+              cy={rewiring.cursor.y}
+              r="5"
+              fill={rewiring.color || "#c9a227"}
+            />
+          </g>
+        )}
+      </svg>
     </main>
   );
 }
-
-export default EditorCanvas;

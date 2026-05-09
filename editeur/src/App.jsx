@@ -1,146 +1,160 @@
-// App.jsx
-// Racine de l'application — gestion de l'état global, simulation, envoi API
-
 import { useEffect, useState } from "react";
 import axios from "axios";
 import "./App.css";
 
-import Header      from "./components/Header";
+import Header from "./components/Header";
 import LeftSidebar from "./components/LeftSidebar";
 import EditorCanvas from "./components/EditorCanvas";
 import RightSidebar from "./components/RightSidebar";
 
-// ── Générateur de données capteurs simulées ───────────────────────────────────
 function rand(min, max, dec = 1) {
   return Number((Math.random() * (max - min) + min).toFixed(dec));
 }
 
 function generateSensorData() {
   const temperature = rand(22, 36);
-  const humidity    = rand(45, 88);
-  const co2         = rand(380, 1200, 0);
-  const smoke       = rand(0, 350, 0);
+  const humidity = rand(45, 88);
+  const co2 = rand(380, 1200, 0);
+  const smoke = rand(0, 350, 0);
+  const pressure = rand(990, 1035, 0);
 
   return {
-    source:      "Raspberry Pi 5",
+    source: "Raspberry Pi 5",
     temperature,
     humidity,
     co2,
     smoke,
-    status:      co2 > 900 || smoke > 200 ? "danger" : "normal",
-    timestamp:   new Date().toISOString(),
+    pressure,
+    status: co2 > 900 || smoke > 200 ? "danger" : "normal",
+    timestamp: new Date().toISOString(),
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 export default function App() {
-  // ── Circuit : composants placés et fils ──────────────────────────────────
   const [items, setItems] = useState([
-    { id: "rpi-default",        type: "rpi5",       x: 440, y: 160 },
-    { id: "breadboard-default", type: "breadboard", x: 380, y: 420 },
-    { id: "dht22-default",      type: "dht22",      x: 140, y: 150 },
-    { id: "mq135-default",      type: "mq135",      x: 140, y: 310 },
+    { id: "rpi-default", type: "rpi5", x: 440, y: 160 },
+    { id: "breadboard-default", type: "breadboard", x: 380, y: 430 },
+    { id: "dht22-default", type: "dht22", x: 140, y: 150 },
+    { id: "mq135-default", type: "mq135", x: 140, y: 330 },
   ]);
 
-  const [wires,      setWires]      = useState([]);
+  const [wires, setWires] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
 
-  // ── Mode câblage & pin en attente ────────────────────────────────────────
-  const [wireMode,    setWireMode]    = useState(false);
-  const [pendingPin,  setPendingPin]  = useState(null);
-
-  // ── Zoom ─────────────────────────────────────────────────────────────────
   const [zoom, setZoom] = useState(100);
 
-  // ── Simulation ───────────────────────────────────────────────────────────
-  const [running,    setRunning]    = useState(false);
+  const [running, setRunning] = useState(false);
   const [sensorData, setSensorData] = useState(generateSensorData());
 
-  // ── API REST ─────────────────────────────────────────────────────────────
+  const [port, setPort] = useState("3001");
+  const [apiUrl, setApiUrl] = useState("http://localhost:3001/api/iot/data");
   const [apiEnabled, setApiEnabled] = useState(false);
-  const [apiBaseUrl, setApiBaseUrl] = useState("http://localhost:3001/api/sensors");
-  const [apiLogs,    setApiLogs]    = useState([]);
-  const [port,       setPort]       = useState("3001");
+  const [logs, setLogs] = useState([]);
 
-  // Synchroniser le port dans l'URL de base
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+
   useEffect(() => {
-    setApiBaseUrl(`http://localhost:${port}/api/sensors`);
+    setApiUrl(`http://localhost:${port}/api/iot/data`);
   }, [port]);
 
-  // ── Boucle de simulation (2.5 s) ─────────────────────────────────────────
   useEffect(() => {
     if (!running) return;
 
-    const id = setInterval(() => {
+    const interval = setInterval(() => {
       const data = generateSensorData();
       setSensorData(data);
-      if (apiEnabled) sendToApi(data, true);
+
+      if (apiEnabled) {
+        sendData(data, true);
+      }
     }, 2500);
 
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, apiEnabled, apiBaseUrl]);
+    return () => clearInterval(interval);
+  }, [running, apiEnabled, apiUrl]);
 
-  // ── Envoi vers l'API ──────────────────────────────────────────────────────
-  async function sendToApi(data = sensorData, automatic = false) {
-    const method = automatic ? "AUTO POST" : "POST";
-    const time   = new Date().toLocaleTimeString("fr-FR");
+  async function sendData(data = sensorData, automatic = false) {
+    const payload = {
+      ...data,
+      source: "Raspberry Pi 5",
+      transmission: automatic ? "automatic" : "manual",
+      apiUrl,
+    };
 
-    if (!apiEnabled) {
-      addLog({ method, status: "blocked", time, message: "Transmission API désactivée." });
-      return;
-    }
+    const logBase = {
+      id: Date.now(),
+      method: "POST",
+      url: apiUrl,
+      payload,
+      time: new Date().toLocaleTimeString(),
+    };
 
     try {
-      await axios.post(apiBaseUrl, data);
-      addLog({ method, status: "success", time, message: `✅ Données envoyées → ${apiBaseUrl}` });
-    } catch (err) {
-      addLog({
-        method,
-        status: "error",
-        time,
-        message: `❌ Erreur : ${err?.message || "Impossible de joindre l'API"}`,
-      });
+      await axios.post(apiUrl, payload);
+
+      setLogs((previous) => [
+        {
+          ...logBase,
+          status: "success",
+          message: "Données envoyées avec succès",
+        },
+        ...previous,
+      ]);
+    } catch (error) {
+      setLogs((previous) => [
+        {
+          ...logBase,
+          status: "error",
+          message:
+            "API non joignable. C’est normal si ton serveur externe n’est pas encore créé.",
+        },
+        ...previous,
+      ]);
     }
   }
 
-  function addLog(entry) {
-    setApiLogs((prev) => [{ id: Date.now(), ...entry }, ...prev].slice(0, 20));
-  }
-
-  // ── Bouton "Envoyer test" ─────────────────────────────────────────────────
-  function sendNow() {
-    const data = generateSensorData();
-    setSensorData(data);
-    sendToApi(data, false);
-  }
-
-  // ── Effacer le circuit ────────────────────────────────────────────────────
   function clearAll() {
     setItems([]);
     setWires([]);
     setSelectedId(null);
-    setPendingPin(null);
+    setLogs([]);
   }
 
-  // ── Rendu ─────────────────────────────────────────────────────────────────
+  const workspaceClassName = [
+    "workspace",
+    leftCollapsed ? "left-collapsed" : "",
+    rightCollapsed ? "right-collapsed" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div className="app-shell">
       <Header
-        wireMode={wireMode}
-        setWireMode={setWireMode}
         running={running}
         setRunning={setRunning}
-        sendNow={sendNow}
+        sendNow={() => sendData(sensorData, false)}
         clearAll={clearAll}
         port={port}
         setPort={setPort}
         zoom={zoom}
         setZoom={setZoom}
+        apiEnabled={apiEnabled}
+        setApiEnabled={setApiEnabled}
       />
 
-      <div className="workspace">
-        <LeftSidebar />
+      <div className={workspaceClassName}>
+        <div className="side-shell left-side-shell">
+          <button
+            className="sidebar-collapse-btn left"
+            onClick={() => setLeftCollapsed((value) => !value)}
+            title={leftCollapsed ? "Afficher les composants" : "Réduire le menu gauche"}
+          >
+            {leftCollapsed ? "›" : "‹"}
+          </button>
+
+          {!leftCollapsed && <LeftSidebar />}
+        </div>
 
         <EditorCanvas
           items={items}
@@ -149,26 +163,34 @@ export default function App() {
           setWires={setWires}
           selectedId={selectedId}
           setSelectedId={setSelectedId}
-          wireMode={wireMode}
-          pendingPin={pendingPin}
-          setPendingPin={setPendingPin}
           running={running}
           sensorData={sensorData}
           zoom={zoom}
         />
 
-        <RightSidebar
-          selectedId={selectedId}
-          items={items}
-          sensorData={sensorData}
-          apiEnabled={apiEnabled}
-          setApiEnabled={setApiEnabled}
-          apiBaseUrl={apiBaseUrl}
-          setApiBaseUrl={setApiBaseUrl}
-          apiLogs={apiLogs}
-          sendNow={sendNow}
-          running={running}
-        />
+        <div className="side-shell right-side-shell">
+          <button
+            className="sidebar-collapse-btn right"
+            onClick={() => setRightCollapsed((value) => !value)}
+            title={rightCollapsed ? "Afficher le panneau droit" : "Réduire le menu droit"}
+          >
+            {rightCollapsed ? "‹" : "›"}
+          </button>
+
+          {!rightCollapsed && (
+            <RightSidebar
+              selectedId={selectedId}
+              items={items}
+              wires={wires}
+              sensorData={sensorData}
+              running={running}
+              logs={logs}
+              apiUrl={apiUrl}
+              apiEnabled={apiEnabled}
+              setApiEnabled={setApiEnabled}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

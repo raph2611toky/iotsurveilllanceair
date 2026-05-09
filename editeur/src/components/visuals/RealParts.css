@@ -1,0 +1,37 @@
+.real-component-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.real-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  user-select: none;
+  pointer-events: none;
+}
+
+.svg-rpi5,
+.svg-breadboard-real,
+.svg-dht-real,
+.svg-mq-real,
+.svg-pressure,
+.svg-soil,
+.svg-bmp,
+.svg-pir,
+.svg-wireless,
+.svg-relay,
+.svg-buzzer,
+.svg-oled,
+.svg-resistor,
+.svg-led,
+.svg-jumper,
+.svg-capacitor,
+.svg-transistor,
+.svg-power,
+.svg-gnd,
+.svg-generic {
+  filter: drop-shadow(0 7px 14px rgba(0, 0, 0, 0.14));
+}
