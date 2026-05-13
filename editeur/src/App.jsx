@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import "./App.css";
 
@@ -6,33 +6,191 @@ import Header from "./components/Header";
 import LeftSidebar from "./components/LeftSidebar";
 import EditorCanvas from "./components/EditorCanvas";
 import RightSidebar from "./components/RightSidebar";
+import PiConfigModal from "./components/PiConfigModal";
+import { componentsData } from "./data/componentsData";
 
-function rand(min, max, dec = 1) {
+const SENSOR_TYPES = ["dht22", "mq135", "mq2", "bmp280", "pir", "pressure", "soil"];
+
+const DEFAULT_SENSOR_CONFIGS = {
+  dht22: {
+    temperature: 28,
+    humidity: 65,
+    variation: 4,
+  },
+  mq135: {
+    co2: 650,
+    variation: 120,
+  },
+  mq2: {
+    smoke: 80,
+    variation: 60,
+  },
+  bmp280: {
+    pressure: 1012,
+    temperature: 27,
+    variation: 8,
+  },
+  pir: {
+    motion: false,
+    variation: 1,
+  },
+  pressure: {
+    pressure: 1013,
+    variation: 20,
+  },
+  soil: {
+    humidity: 55,
+    variation: 12,
+  },
+};
+
+function randAround(base, variation, dec = 1) {
+  const min = Number(base) - Number(variation);
+  const max = Number(base) + Number(variation);
   return Number((Math.random() * (max - min) + min).toFixed(dec));
 }
 
-function generateSensorData() {
-  const temperature = rand(22, 36);
-  const humidity = rand(45, 88);
-  const co2 = rand(380, 1200, 0);
-  const smoke = rand(0, 350, 0);
-  const pressure = rand(990, 1035, 0);
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function isSensor(type) {
+  return SENSOR_TYPES.includes(type);
+}
+
+function createDefaultConfigFor(type) {
+  return {
+    ...(DEFAULT_SENSOR_CONFIGS[type] || {}),
+  };
+}
+
+function generateSensorValue(type, config) {
+  if (type === "dht22") {
+    return {
+      type,
+      temperature: clamp(randAround(config.temperature ?? 28, config.variation ?? 4), -40, 80),
+      humidity: clamp(randAround(config.humidity ?? 65, config.variation ?? 4), 0, 100),
+      unit: "°C / %",
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  if (type === "mq135") {
+    const co2 = clamp(randAround(config.co2 ?? 650, config.variation ?? 120, 0), 300, 2500);
+
+    return {
+      type,
+      co2,
+      airQuality: co2 > 1000 ? "mauvaise" : co2 > 800 ? "moyenne" : "bonne",
+      unit: "ppm",
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  if (type === "mq2") {
+    const smoke = clamp(randAround(config.smoke ?? 80, config.variation ?? 60, 0), 0, 1000);
+
+    return {
+      type,
+      smoke,
+      alert: smoke > 250,
+      unit: "ppm",
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  if (type === "bmp280") {
+    return {
+      type,
+      pressure: clamp(randAround(config.pressure ?? 1012, config.variation ?? 8, 0), 850, 1100),
+      temperature: clamp(randAround(config.temperature ?? 27, 2, 1), -20, 80),
+      unit: "hPa",
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  if (type === "pir") {
+    const randomMotion = Math.random() > 0.65;
+
+    return {
+      type,
+      motion: Boolean(config.motion) || randomMotion,
+      label: Boolean(config.motion) || randomMotion ? "Mouvement" : "Calme",
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  if (type === "pressure") {
+    return {
+      type,
+      pressure: clamp(randAround(config.pressure ?? 1013, config.variation ?? 20, 0), 500, 2000),
+      unit: "hPa",
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  if (type === "soil") {
+    return {
+      type,
+      humidity: clamp(randAround(config.humidity ?? 55, config.variation ?? 12, 1), 0, 100),
+      unit: "%",
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  return {
+    type,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function generateSensorDataByItem(items, sensorConfigs) {
+  const result = {};
+
+  items.forEach((item) => {
+    if (!isSensor(item.type)) return;
+
+    const config = sensorConfigs[item.id] || createDefaultConfigFor(item.type);
+    result[item.id] = generateSensorValue(item.type, config);
+  });
+
+  return result;
+}
+
+function buildApiPayload(items, wires, sensorDataByItem) {
+  const sensors = items
+    .filter((item) => isSensor(item.type))
+    .map((item) => ({
+      itemId: item.id,
+      type: item.type,
+      name: componentsData[item.type]?.name || item.type,
+      data: sensorDataByItem[item.id] || null,
+    }));
+
+  const raspberryPi = items.find((item) => item.type === "rpi5");
 
   return {
     source: "Raspberry Pi 5",
-    temperature,
-    humidity,
-    co2,
-    smoke,
-    pressure,
-    status: co2 > 900 || smoke > 200 ? "danger" : "normal",
+    raspberryPi: raspberryPi
+      ? {
+          itemId: raspberryPi.id,
+          powered: Boolean(raspberryPi.powered),
+        }
+      : null,
+    sensors,
+    connections: wires.map((wire) => ({
+      from: wire.from,
+      to: wire.to,
+      color: wire.color,
+    })),
+    status: sensors.some((sensor) => sensor.data?.alert) ? "danger" : "normal",
     timestamp: new Date().toISOString(),
   };
 }
 
 export default function App() {
   const [items, setItems] = useState([
-    { id: "rpi-default", type: "rpi5", x: 440, y: 160 },
+    { id: "rpi-default", type: "rpi5", x: 440, y: 160, powered: false },
     { id: "breadboard-default", type: "breadboard", x: 380, y: 430 },
     { id: "dht22-default", type: "dht22", x: 140, y: 150 },
     { id: "mq135-default", type: "mq135", x: 140, y: 330 },
@@ -40,11 +198,11 @@ export default function App() {
 
   const [wires, setWires] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-
   const [zoom, setZoom] = useState(100);
 
   const [running, setRunning] = useState(false);
-  const [sensorData, setSensorData] = useState(generateSensorData());
+  const [sensorConfigs, setSensorConfigs] = useState({});
+  const [sensorDataByItem, setSensorDataByItem] = useState({});
 
   const [port, setPort] = useState("3001");
   const [apiUrl, setApiUrl] = useState("http://localhost:3001/api/iot/data");
@@ -54,29 +212,85 @@ export default function App() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
+  const [piConfigItemId, setPiConfigItemId] = useState(null);
+
+  const selectedItem = useMemo(() => {
+    return items.find((item) => item.id === selectedId) || null;
+  }, [items, selectedId]);
+
+  const piConfigItem = useMemo(() => {
+    return items.find((item) => item.id === piConfigItemId) || null;
+  }, [items, piConfigItemId]);
+
   useEffect(() => {
     setApiUrl(`http://localhost:${port}/api/iot/data`);
   }, [port]);
 
   useEffect(() => {
+    setSensorConfigs((previous) => {
+      const next = { ...previous };
+
+      items.forEach((item) => {
+        if (isSensor(item.type) && !next[item.id]) {
+          next[item.id] = createDefaultConfigFor(item.type);
+        }
+      });
+
+      Object.keys(next).forEach((itemId) => {
+        if (!items.some((item) => item.id === itemId)) {
+          delete next[itemId];
+        }
+      });
+
+      return next;
+    });
+  }, [items]);
+
+  useEffect(() => {
+    setSensorDataByItem(generateSensorDataByItem(items, sensorConfigs));
+  }, [sensorConfigs, items]);
+
+  useEffect(() => {
     if (!running) return;
 
     const interval = setInterval(() => {
-      const data = generateSensorData();
-      setSensorData(data);
+      const nextData = generateSensorDataByItem(items, sensorConfigs);
+      setSensorDataByItem(nextData);
 
       if (apiEnabled) {
-        sendData(data, true);
+        sendData(nextData, true);
       }
-    }, 2500);
+    }, 1600);
 
     return () => clearInterval(interval);
-  }, [running, apiEnabled, apiUrl]);
+  }, [running, apiEnabled, apiUrl, items, sensorConfigs]);
 
-  async function sendData(data = sensorData, automatic = false) {
+  function updateSensorConfig(itemId, key, value) {
+    setSensorConfigs((previous) => ({
+      ...previous,
+      [itemId]: {
+        ...(previous[itemId] || {}),
+        [key]: value,
+      },
+    }));
+  }
+
+  function toggleRpiPower(itemId) {
+    setItems((previous) =>
+      previous.map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              powered: !item.powered,
+            }
+          : item
+      )
+    );
+  }
+
+  async function sendData(dataOverride = sensorDataByItem, automatic = false) {
     const payload = {
-      ...data,
-      source: "Raspberry Pi 5",
+      ...buildApiPayload(items, wires, dataOverride),
       transmission: automatic ? "automatic" : "manual",
       apiUrl,
     };
@@ -100,7 +314,7 @@ export default function App() {
         },
         ...previous,
       ]);
-    } catch (error) {
+    } catch {
       setLogs((previous) => [
         {
           ...logBase,
@@ -118,6 +332,39 @@ export default function App() {
     setWires([]);
     setSelectedId(null);
     setLogs([]);
+    setSensorConfigs({});
+    setSensorDataByItem({});
+    setPiConfigItemId(null);
+  }
+
+  function handleApplyPiConfig() {
+    setLogs((previous) => [
+      {
+        id: Date.now(),
+        status: "success",
+        method: "UPLOAD",
+        url: "Raspberry Pi 5 virtuel",
+        time: new Date().toLocaleTimeString(),
+        message: "Configuration téléversée virtuellement dans le Raspberry Pi 5.",
+      },
+      ...previous,
+    ]);
+
+    setPiConfigItemId(null);
+  }
+
+  if (piConfigItem) {
+    return (
+      <PiConfigModal
+        item={piConfigItem}
+        items={items}
+        wires={wires}
+        sensorConfigs={sensorConfigs}
+        sensorDataByItem={sensorDataByItem}
+        onClose={() => setPiConfigItemId(null)}
+        onApply={handleApplyPiConfig}
+      />
+    );
   }
 
   const workspaceClassName = [
@@ -133,7 +380,7 @@ export default function App() {
       <Header
         running={running}
         setRunning={setRunning}
-        sendNow={() => sendData(sensorData, false)}
+        sendNow={() => sendData(sensorDataByItem, false)}
         clearAll={clearAll}
         port={port}
         setPort={setPort}
@@ -164,8 +411,11 @@ export default function App() {
           selectedId={selectedId}
           setSelectedId={setSelectedId}
           running={running}
-          sensorData={sensorData}
+          sensorDataByItem={sensorDataByItem}
+          sensorConfigs={sensorConfigs}
           zoom={zoom}
+          toggleRpiPower={toggleRpiPower}
+          openPiConfig={(itemId) => setPiConfigItemId(itemId)}
         />
 
         <div className="side-shell right-side-shell">
@@ -179,15 +429,18 @@ export default function App() {
 
           {!rightCollapsed && (
             <RightSidebar
-              selectedId={selectedId}
+              selectedItem={selectedItem}
               items={items}
               wires={wires}
-              sensorData={sensorData}
+              sensorConfigs={sensorConfigs}
+              sensorDataByItem={sensorDataByItem}
+              updateSensorConfig={updateSensorConfig}
               running={running}
               logs={logs}
               apiUrl={apiUrl}
               apiEnabled={apiEnabled}
               setApiEnabled={setApiEnabled}
+              openPiConfig={(itemId) => setPiConfigItemId(itemId)}
             />
           )}
         </div>

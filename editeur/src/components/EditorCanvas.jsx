@@ -5,6 +5,15 @@ import ComponentVisual from "./ComponentVisual";
 const WORLD_WIDTH = 3200;
 const WORLD_HEIGHT = 2200;
 
+function getPinUniqueKey(pin) {
+  return (
+    pin.pinKey ||
+    pin.key ||
+    pin.id ||
+    `pin-${pin.number || pin.pinName || pin.name}-${pin.x}-${pin.y}`
+  );
+}
+
 function chooseWireColor(fromPin, toPin, fallbackColor) {
   const text = `${fromPin} ${toPin}`.toUpperCase();
 
@@ -24,7 +33,7 @@ function chooseWireColor(fromPin, toPin, fallbackColor) {
 }
 
 function makePinKey(pinRef) {
-  return `${pinRef.itemId}:${pinRef.pinName}`;
+  return `${pinRef.itemId}:${getPinUniqueKey(pinRef)}`;
 }
 
 function makeWirePath(points) {
@@ -87,6 +96,75 @@ function isRightButton(event) {
   return event.button === 2;
 }
 
+function SensorSimulationEffect({ item, running, data }) {
+  if (!running || !data) return null;
+
+  if (item.type === "dht22") {
+    return (
+      <div className="sensor-effect humidity-effect">
+        <span />
+        <span />
+        <span />
+        <strong>{data.humidity}%</strong>
+      </div>
+    );
+  }
+
+  if (item.type === "mq135") {
+    return (
+      <div className="sensor-effect air-effect">
+        <span />
+        <span />
+        <span />
+        <strong>{data.co2} ppm</strong>
+      </div>
+    );
+  }
+
+  if (item.type === "mq2") {
+    return (
+      <div className={data.alert ? "sensor-effect smoke-effect alert" : "sensor-effect smoke-effect"}>
+        <span />
+        <span />
+        <span />
+        <strong>{data.smoke} ppm</strong>
+      </div>
+    );
+  }
+
+  if (item.type === "bmp280" || item.type === "pressure") {
+    return (
+      <div className="sensor-effect pressure-effect">
+        <span />
+        <span />
+        <strong>{data.pressure} hPa</strong>
+      </div>
+    );
+  }
+
+  if (item.type === "soil") {
+    return (
+      <div className="sensor-effect soil-effect">
+        <span />
+        <span />
+        <span />
+        <strong>{data.humidity}%</strong>
+      </div>
+    );
+  }
+
+  if (item.type === "pir") {
+    return (
+      <div className={data.motion ? "sensor-effect pir-effect motion" : "sensor-effect pir-effect"}>
+        <span />
+        <strong>{data.label}</strong>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export default function EditorCanvas({
   items,
   setItems,
@@ -95,8 +173,10 @@ export default function EditorCanvas({
   selectedId,
   setSelectedId,
   running,
-  sensorData,
+  sensorDataByItem = {},
   zoom,
+  toggleRpiPower,
+  openPiConfig,
 }) {
   const canvasRef = useRef(null);
   const rightClickMemory = useRef({ wireId: null, time: 0 });
@@ -109,6 +189,7 @@ export default function EditorCanvas({
   const [draggingPoint, setDraggingPoint] = useState(null);
   const [rewiring, setRewiring] = useState(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [contextMenu, setContextMenu] = useState(null);
 
   const usedPinKeys = useMemo(() => {
     const keys = new Set();
@@ -131,10 +212,15 @@ export default function EditorCanvas({
   }
 
   function makePinRef(item, pin) {
+    const pinKey = getPinUniqueKey(pin);
+
     return {
       itemId: item.id,
       itemType: item.type,
+      pinKey,
+      pinNumber: pin.number || null,
       pinName: pin.name,
+      name: pin.name,
       label: pin.label || pin.name,
       x: item.x + pin.x,
       y: item.y + pin.y,
@@ -147,14 +233,28 @@ export default function EditorCanvas({
     if (!item) return pinRef;
 
     const component = componentsData[item.type];
-    const pin = component?.pins?.find(
-      (currentPin) => currentPin.name === pinRef.pinName
-    );
+
+    const pin = component?.pins?.find((currentPin) => {
+      const currentKey = getPinUniqueKey(currentPin);
+
+      if (pinRef.pinKey && currentKey === pinRef.pinKey) return true;
+      if (pinRef.pinNumber && currentPin.number === pinRef.pinNumber) return true;
+
+      return (
+        currentPin.name === pinRef.pinName &&
+        Number(currentPin.x) === Number(pinRef.x - item.x) &&
+        Number(currentPin.y) === Number(pinRef.y - item.y)
+      );
+    });
 
     if (!pin) return pinRef;
 
     return {
       ...pinRef,
+      pinKey: getPinUniqueKey(pin),
+      pinNumber: pin.number || null,
+      pinName: pin.name,
+      name: pin.name,
       x: item.x + pin.x,
       y: item.y + pin.y,
       label: pin.label || pin.name,
@@ -179,6 +279,7 @@ export default function EditorCanvas({
       type: componentType,
       x: point.x - component.width / 2,
       y: point.y - component.height / 2,
+      powered: componentType === "rpi5" ? false : undefined,
     };
 
     setItems((previous) => [...previous, newItem]);
@@ -190,7 +291,8 @@ export default function EditorCanvas({
 
     if (
       event.target.classList.contains("pin") ||
-      event.target.classList.contains("delete-btn")
+      event.target.classList.contains("delete-btn") ||
+      event.target.classList.contains("rpi-power-toggle")
     ) {
       return;
     }
@@ -413,7 +515,6 @@ export default function EditorCanvas({
                     newTo.pinName,
                     currentWire.color
                   ),
-                  points: currentWire.points || createFlexiblePoints(newFrom, newTo),
                 };
               })
             );
@@ -438,10 +539,12 @@ export default function EditorCanvas({
   }
 
   function handlePinMouseLeave(item, pin) {
+    const leavingPin = makePinRef(item, pin);
+
     setHoveredPin((current) => {
       if (!current) return null;
 
-      if (current.itemId === item.id && current.pinName === pin.name) {
+      if (makePinKey(current) === makePinKey(leavingPin)) {
         return null;
       }
 
@@ -588,7 +691,22 @@ export default function EditorCanvas({
     setSelectedId(null);
   }
 
+  function handleContextMenu(event, item) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (item.type !== "rpi5") return;
+
+    setContextMenu({
+      itemId: item.id,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }
+
   function handleCanvasClick(event) {
+    setContextMenu(null);
+
     const isCanvas =
       event.target === canvasRef.current ||
       event.target.classList.contains("canvas-grid");
@@ -635,10 +753,10 @@ export default function EditorCanvas({
           const component = componentsData[item.type];
           if (!component) return null;
 
-          const disabledPinNames = new Set();
+          const disabledPinKeys = new Set();
 
           component.pins?.forEach((pin) => {
-            const pinKey = `${item.id}:${pin.name}`;
+            const pinKey = `${item.id}:${getPinUniqueKey(pin)}`;
 
             const usedByThisRewiring =
               rewiring &&
@@ -658,9 +776,11 @@ export default function EditorCanvas({
               });
 
             if (usedPinKeys.has(pinKey) && !usedByThisRewiring) {
-              disabledPinNames.add(pin.name);
+              disabledPinKeys.add(getPinUniqueKey(pin));
             }
           });
+
+          const itemSensorData = sensorDataByItem[item.id];
 
           return (
             <div
@@ -676,6 +796,7 @@ export default function EditorCanvas({
                 setSelectedId(item.id);
                 startMoveItem(event, item.id);
               }}
+              onContextMenu={(event) => handleContextMenu(event, item)}
               onClick={(event) => {
                 event.stopPropagation();
                 setSelectedId(item.id);
@@ -694,16 +815,37 @@ export default function EditorCanvas({
                 </button>
               )}
 
+              {item.type === "rpi5" && (
+                <button
+                  className={item.powered ? "rpi-power-toggle on" : "rpi-power-toggle"}
+                  title={item.powered ? "Éteindre le Raspberry Pi" : "Allumer le Raspberry Pi"}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleRpiPower(item.id);
+                  }}
+                >
+                  ⏻
+                </button>
+              )}
+
+              <SensorSimulationEffect
+                item={item}
+                running={running}
+                data={itemSensorData}
+              />
+
               <ComponentVisual
                 component={component}
-                disabledPinNames={disabledPinNames}
+                disabledPinKeys={disabledPinKeys}
                 onPinMouseDown={(pin, event) =>
                   startWireFromPin(item, pin, event)
                 }
                 onPinMouseEnter={(pin) => handlePinMouseEnter(item, pin)}
                 onPinMouseLeave={(pin) => handlePinMouseLeave(item, pin)}
-                running={running}
-                sensorData={sensorData}
+                running={running && (item.type !== "rpi5" || item.powered)}
+                sensorData={itemSensorData}
+                powered={item.powered}
               />
             </div>
           );
@@ -865,6 +1007,35 @@ export default function EditorCanvas({
           </g>
         )}
       </svg>
+
+      {contextMenu && (
+        <div
+          className="rpi-context-menu"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+          }}
+        >
+          <button
+            onClick={() => {
+              openPiConfig(contextMenu.itemId);
+              setContextMenu(null);
+            }}
+          >
+            Configurer
+          </button>
+
+          <button
+            className="danger"
+            onClick={() => {
+              deleteSelected(contextMenu.itemId);
+              setContextMenu(null);
+            }}
+          >
+            Supprimer
+          </button>
+        </div>
+      )}
     </main>
   );
 }

@@ -24,6 +24,10 @@ import {
   GenericSvg,
 } from "./visuals/OtherPartsSvg";
 
+function getPinUniqueKey(pin) {
+  return pin.pinKey || pin.key || pin.id || `pin-${pin.number || pin.pinName || pin.name}-${pin.x}-${pin.y}`;
+}
+
 function Pin({
   pin,
   disabled = false,
@@ -32,12 +36,14 @@ function Pin({
   onPinMouseLeave,
 }) {
   const pinLabel = pin.label || pin.name;
+  const pinKey = getPinUniqueKey(pin);
 
   return (
     <button
       className={disabled ? "pin pin-disabled" : "pin"}
       title={disabled ? `${pinLabel} déjà connecté` : pinLabel}
       data-pin-label={disabled ? `${pinLabel} déjà connecté` : pinLabel}
+      data-pin-key={pinKey}
       disabled={disabled}
       style={{
         left: pin.x,
@@ -66,7 +72,7 @@ function Pin({
 
 function ComponentFrame({
   component,
-  disabledPinNames = new Set(),
+  disabledPinKeys = new Set(),
   onPinMouseDown,
   onPinMouseEnter,
   onPinMouseLeave,
@@ -82,16 +88,20 @@ function ComponentFrame({
     >
       {children}
 
-      {component.pins?.map((pin) => (
-        <Pin
-          key={`${component.type}-${pin.number || pin.name}-${pin.x}-${pin.y}`}
-          pin={pin}
-          disabled={disabledPinNames.has(pin.name)}
-          onPinMouseDown={onPinMouseDown}
-          onPinMouseEnter={onPinMouseEnter}
-          onPinMouseLeave={onPinMouseLeave}
-        />
-      ))}
+      {component.pins?.map((pin) => {
+        const pinKey = getPinUniqueKey(pin);
+
+        return (
+          <Pin
+            key={`${component.type}-${pinKey}`}
+            pin={pin}
+            disabled={disabledPinKeys.has(pinKey)}
+            onPinMouseDown={onPinMouseDown}
+            onPinMouseEnter={onPinMouseEnter}
+            onPinMouseLeave={onPinMouseLeave}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -116,7 +126,7 @@ function getLiveValue(type, sensorData, running) {
   }
 
   if (type === "pir") {
-    return "Calme";
+    return sensorData.label || "Calme";
   }
 
   if (type === "soil") {
@@ -132,18 +142,19 @@ function getLiveValue(type, sensorData, running) {
 
 export default function ComponentVisual({
   component,
-  disabledPinNames,
+  disabledPinKeys = new Set(),
   onPinMouseDown,
   onPinMouseEnter,
   onPinMouseLeave,
   running = false,
   sensorData = null,
+  powered = false,
 }) {
   const liveValue = getLiveValue(component.type, sensorData, running);
 
   const frameProps = {
     component,
-    disabledPinNames,
+    disabledPinKeys,
     onPinMouseDown,
     onPinMouseEnter,
     onPinMouseLeave,
@@ -157,6 +168,7 @@ export default function ComponentVisual({
             width={component.width}
             height={component.height}
             running={running}
+            powered={powered}
           />
         </ComponentFrame>
       );
