@@ -133,6 +133,152 @@ function isRightButton(event) {
   return event.button === 2;
 }
 
+
+function isVoltageName(value = "") {
+  const text = String(value).toUpperCase();
+  return (
+    text.includes("VCC") ||
+    text.includes("5V") ||
+    text.includes("3V3") ||
+    text.includes("3.3V") ||
+    text === "+"
+  );
+}
+
+function isGroundName(value = "") {
+  const text = String(value).toUpperCase();
+  return text.includes("GND") || text === "-" || text.includes("GROUND");
+}
+
+function getPinNodeId(itemId, pin) {
+  return `${itemId}:${getPinUniqueKey(pin)}`;
+}
+
+function createUnionFind() {
+  const parent = new Map();
+
+  function find(x) {
+    if (!parent.has(x)) parent.set(x, x);
+    const px = parent.get(x);
+    if (px !== x) parent.set(x, find(px));
+    return parent.get(x);
+  }
+
+  function union(a, b) {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(rb, ra);
+  }
+
+  function connected(a, b) {
+    return find(a) === find(b);
+  }
+
+  return { find, union, connected };
+}
+
+function getBreadboardGroupKey(pinName = "") {
+  const name = String(pinName).toUpperCase();
+
+  if (/^L\+\d+$/.test(name)) return "LEFT_PLUS_RAIL";
+  if (/^L-\d+$/.test(name)) return "LEFT_MINUS_RAIL";
+  if (/^R\+\d+$/.test(name)) return "RIGHT_PLUS_RAIL";
+  if (/^R-\d+$/.test(name)) return "RIGHT_MINUS_RAIL";
+
+  // Choix volontaire pour ton simulateur : A4, A7, A11 et A19 sont considérés
+  // comme une même ligne électrique parce qu'ils appartiennent à la colonne A.
+  const columnMatch = name.match(/^([A-J])(\d+)$/);
+  if (columnMatch) return `COLUMN_${columnMatch[1]}`;
+
+  return null;
+}
+
+function computePoweredItems(items, wires) {
+  const uf = createUnionFind();
+  const pinLookup = new Map();
+
+  items.forEach((item) => {
+    const component = componentsData[item.type];
+    component?.pins?.forEach((pin) => {
+      const nodeId = getPinNodeId(item.id, pin);
+      uf.find(nodeId);
+      pinLookup.set(nodeId, { item, pin });
+    });
+  });
+
+  // Connexions électriques internes de la breadboard.
+  items.forEach((item) => {
+    if (item.type !== "breadboard") return;
+
+    const component = componentsData[item.type];
+    const groups = new Map();
+
+    component?.pins?.forEach((pin) => {
+      const groupKey = getBreadboardGroupKey(pin.name);
+      if (!groupKey) return;
+
+      if (!groups.has(groupKey)) groups.set(groupKey, []);
+      groups.get(groupKey).push(getPinNodeId(item.id, pin));
+    });
+
+    groups.forEach((nodes) => {
+      const [first, ...rest] = nodes;
+      rest.forEach((node) => uf.union(first, node));
+    });
+  });
+
+  wires.forEach((wire) => {
+    if (!wire?.from || !wire?.to) return;
+    uf.union(makePinKey(wire.from), makePinKey(wire.to));
+  });
+
+  const poweredRpiItems = items.filter((item) => item.type === "rpi5" && item.powered);
+  const voltageSources = [];
+  const groundSources = [];
+
+  poweredRpiItems.forEach((rpi) => {
+    const component = componentsData[rpi.type];
+    component?.pins?.forEach((pin) => {
+      const nodeId = getPinNodeId(rpi.id, pin);
+      const text = `${pin.name} ${pin.label || ""}`;
+
+      if (isVoltageName(text)) voltageSources.push(nodeId);
+      if (isGroundName(text)) groundSources.push(nodeId);
+    });
+  });
+
+  const poweredItemIds = new Set(poweredRpiItems.map((item) => item.id));
+
+  items.forEach((item) => {
+    if (item.type === "rpi5" || item.type === "breadboard") return;
+
+    const component = componentsData[item.type];
+    if (!component?.pins?.length) return;
+
+    const itemVoltagePins = component.pins
+      .filter((pin) => isVoltageName(`${pin.name} ${pin.label || ""}`))
+      .map((pin) => getPinNodeId(item.id, pin));
+
+    const itemGroundPins = component.pins
+      .filter((pin) => isGroundName(`${pin.name} ${pin.label || ""}`))
+      .map((pin) => getPinNodeId(item.id, pin));
+
+    const hasVoltage = itemVoltagePins.some((itemNode) =>
+      voltageSources.some((sourceNode) => uf.connected(itemNode, sourceNode))
+    );
+
+    const hasGround = itemGroundPins.some((itemNode) =>
+      groundSources.some((sourceNode) => uf.connected(itemNode, sourceNode))
+    );
+
+    if (hasVoltage && hasGround) {
+      poweredItemIds.add(item.id);
+    }
+  });
+
+  return poweredItemIds;
+}
+
 function SensorSimulationEffect({ item, running, data }) {
   if (!running || !data) return null;
 
@@ -237,6 +383,10 @@ export default function EditorCanvas({
 
     return keys;
   }, [wires]);
+
+  const poweredItemIds = useMemo(() => {
+    return computePoweredItems(items, wires);
+  }, [items, wires]);
 
   function getCanvasPoint(event) {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -910,9 +1060,9 @@ export default function EditorCanvas({
                 }
                 onPinMouseEnter={(pin) => handlePinMouseEnter(item, pin)}
                 onPinMouseLeave={(pin) => handlePinMouseLeave(item, pin)}
-                running={running && (item.type !== "rpi5" || item.powered)}
+                running={running}
                 sensorData={itemSensorData}
-                powered={item.powered}
+                powered={item.type === "rpi5" ? Boolean(item.powered) : poweredItemIds.has(item.id)}
               />
             </div>
           );

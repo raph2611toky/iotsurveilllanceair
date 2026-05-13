@@ -239,7 +239,7 @@ export const componentsData = {
     width: 95,
     height: 75,
     pins: pins([
-      { key: "BMP280-VCC", name: "VCC", label: "BMP280 VCC 3.3V", x: 15, y: 64, color: "#ff7a30" },
+      { key: "BMP280-VCC", name: "VCC", label: "BMP280 VCC 3.3V", x: 15, y: 64, color: "#ff0d0d" },
       { key: "BMP280-GND", name: "GND", label: "BMP280 GND", x: 35, y: 64, color: "#222222" },
       { key: "BMP280-SCL", name: "SCL", label: "BMP280 SCL", x: 55, y: 64, color: "#00aa00" },
       { key: "BMP280-SDA", name: "SDA", label: "BMP280 SDA", x: 75, y: 64, color: "#0055ff" },

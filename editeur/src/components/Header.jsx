@@ -10,8 +10,12 @@ function Header({
   apiEnabled,
   setApiEnabled,
   currentProjectName,
+  currentProjectId,
+  projects = [],
+  projectApiReady,
   onNewProject,
   onSaveProject,
+  onOpenProject,
 }) {
   function handleZoom(delta) {
     setZoom((value) => Math.min(200, Math.max(40, value + delta)));
@@ -25,7 +29,7 @@ function Header({
         <div>
           <h1>IoT Circuit Simulator</h1>
           <div className="brand-sub">
-            Projet : {currentProjectName || "Aucun projet"}
+            Projet : {currentProjectName || "Aucun projet"} · DB {projectApiReady ? "ON" : "OFF"}
           </div>
         </div>
       </div>
@@ -41,23 +45,31 @@ function Header({
           Sauvegarder
         </button>
 
+        <select
+          className="project-select"
+          value={currentProjectId || ""}
+          onChange={(event) => {
+            if (event.target.value) onOpenProject(event.target.value);
+          }}
+          title="Ouvrir un projet sauvegardé"
+        >
+          <option value="">Projets</option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+
         <div className="tb-sep" />
 
-        <button
-          className="tb-btn"
-          onClick={() => handleZoom(-10)}
-          title="Zoom arrière"
-        >
+        <button className="tb-btn" onClick={() => handleZoom(-10)} title="Zoom arrière">
           −
         </button>
 
         <span className="zoom-value">{zoom}%</span>
 
-        <button
-          className="tb-btn"
-          onClick={() => handleZoom(10)}
-          title="Zoom avant"
-        >
+        <button className="tb-btn" onClick={() => handleZoom(10)} title="Zoom avant">
           +
         </button>
 

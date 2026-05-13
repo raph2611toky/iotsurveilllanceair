@@ -21,8 +21,9 @@ const DEFAULT_SENSOR_CONFIGS = {
   soil: { humidity: 55, variation: 12 },
 };
 
-const STORAGE_CURRENT_PROJECT = "iot-editor-current-project";
-const STORAGE_PROJECT_PREFIX = "iot-editor-project-";
+const PROJECT_API = "http://127.0.0.1:5000/api";
+const STORAGE_CURRENT_PROJECT_ID = "iot-editor-current-project-id";
+const STORAGE_CURRENT_PROJECT_NAME = "iot-editor-current-project-name";
 
 function randAround(base, variation, dec = 1) {
   const min = Number(base) - Number(variation);
@@ -55,7 +56,6 @@ function generateSensorValue(type, config) {
 
   if (type === "mq135") {
     const co2 = clamp(randAround(config.co2 ?? 650, config.variation ?? 120, 0), 300, 2500);
-
     return {
       type,
       co2,
@@ -67,7 +67,6 @@ function generateSensorValue(type, config) {
 
   if (type === "mq2") {
     const smoke = clamp(randAround(config.smoke ?? 80, config.variation ?? 60, 0), 0, 1000);
-
     return {
       type,
       smoke,
@@ -89,7 +88,6 @@ function generateSensorValue(type, config) {
 
   if (type === "pir") {
     const randomMotion = Math.random() > 0.65;
-
     return {
       type,
       motion: Boolean(config.motion) || randomMotion,
@@ -116,10 +114,7 @@ function generateSensorValue(type, config) {
     };
   }
 
-  return {
-    type,
-    timestamp: new Date().toISOString(),
-  };
+  return { type, timestamp: new Date().toISOString() };
 }
 
 function generateSensorDataByItem(items, sensorConfigs) {
@@ -127,7 +122,6 @@ function generateSensorDataByItem(items, sensorConfigs) {
 
   items.forEach((item) => {
     if (!isSensor(item.type)) return;
-
     const config = sensorConfigs[item.id] || createDefaultConfigFor(item.type);
     result[item.id] = generateSensorValue(item.type, config);
   });
@@ -150,10 +144,7 @@ function buildApiPayload(items, wires, sensorDataByItem) {
   return {
     source: "Raspberry Pi 5",
     raspberryPi: raspberryPi
-      ? {
-          itemId: raspberryPi.id,
-          powered: Boolean(raspberryPi.powered),
-        }
+      ? { itemId: raspberryPi.id, powered: Boolean(raspberryPi.powered) }
       : null,
     sensors,
     connections: wires.map((wire) => ({
@@ -169,35 +160,10 @@ function buildApiPayload(items, wires, sensorDataByItem) {
 
 function createInitialItems() {
   return [
-    {
-      id: "rpi-default",
-      type: "rpi5",
-      x: 440,
-      y: 160,
-      rotation: 0,
-      powered: false,
-    },
-    {
-      id: "breadboard-default",
-      type: "breadboard",
-      x: 380,
-      y: 430,
-      rotation: 0,
-    },
-    {
-      id: "dht22-default",
-      type: "dht22",
-      x: 140,
-      y: 150,
-      rotation: 0,
-    },
-    {
-      id: "mq135-default",
-      type: "mq135",
-      x: 140,
-      y: 330,
-      rotation: 0,
-    },
+    { id: "rpi-default", type: "rpi5", x: 440, y: 160, rotation: 0, powered: false },
+    { id: "breadboard-default", type: "breadboard", x: 380, y: 430, rotation: 0 },
+    { id: "dht22-default", type: "dht22", x: 140, y: 150, rotation: 0 },
+    { id: "mq135-default", type: "mq135", x: 140, y: 330, rotation: 0 },
   ];
 }
 
@@ -228,9 +194,13 @@ export default function App() {
 
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-
   const [piConfigItemId, setPiConfigItemId] = useState(null);
+
+  const [projects, setProjects] = useState([]);
+  const [currentProjectId, setCurrentProjectId] = useState(null);
   const [currentProjectName, setCurrentProjectName] = useState("");
+  const [projectApiReady, setProjectApiReady] = useState(false);
+  const [isLoadingProject, setIsLoadingProject] = useState(false);
 
   const selectedItem = useMemo(() => {
     return items.find((item) => item.id === selectedId) || null;
@@ -241,53 +211,103 @@ export default function App() {
   }, [items, piConfigItemId]);
 
   useEffect(() => {
-    const projectName = localStorage.getItem(STORAGE_CURRENT_PROJECT);
+    bootProjectSystem();
+  }, []);
 
-    if (!projectName) {
-      hasLoadedProject.current = true;
-      return;
-    }
-
-    const rawProject = localStorage.getItem(`${STORAGE_PROJECT_PREFIX}${projectName}`);
-
-    if (!rawProject) {
-      localStorage.removeItem(STORAGE_CURRENT_PROJECT);
-      hasLoadedProject.current = true;
-      return;
-    }
-
+  async function bootProjectSystem() {
     try {
-      const project = JSON.parse(rawProject);
+      await axios.get(`${PROJECT_API}/health`);
+      setProjectApiReady(true);
 
-      setCurrentProjectName(project.name || projectName);
-      setItems(Array.isArray(project.items) ? project.items : createInitialItems());
-      setWires(Array.isArray(project.wires) ? project.wires : []);
-      setSensorConfigs(project.sensorConfigs || {});
-      setZoom(project.zoom || 100);
-      setPort(project.port || "3001");
-      setApiEnabled(Boolean(project.apiEnabled));
-      setSelectedId(project.selectedId || null);
-      setLeftCollapsed(Boolean(project.leftCollapsed));
-      setRightCollapsed(Boolean(project.rightCollapsed));
+      const projectsResponse = await axios.get(`${PROJECT_API}/projects`);
+      setProjects(projectsResponse.data || []);
 
+      const savedProjectId = localStorage.getItem(STORAGE_CURRENT_PROJECT_ID);
+      const savedProjectName = localStorage.getItem(STORAGE_CURRENT_PROJECT_NAME) || "";
+
+      if (savedProjectId) {
+        await loadProjectById(Number(savedProjectId), false);
+      } else if (savedProjectName) {
+        setCurrentProjectName(savedProjectName);
+      }
+    } catch {
+      setProjectApiReady(false);
+      setCurrentProjectName(localStorage.getItem(STORAGE_CURRENT_PROJECT_NAME) || "");
       setLogs((previous) => [
         {
           id: Date.now(),
-          status: "success",
-          method: "LOAD",
-          url: project.name || projectName,
+          status: "error",
+          method: "DB",
+          url: PROJECT_API,
           time: new Date().toLocaleTimeString(),
-          message: "Projet rechargé automatiquement après actualisation.",
+          message: "Backend Flask non joignable. Lance dashboard/app.py pour charger/sauvegarder les projets.",
         },
         ...previous,
       ]);
-    } catch {
-      localStorage.removeItem(STORAGE_CURRENT_PROJECT);
-      localStorage.removeItem(`${STORAGE_PROJECT_PREFIX}${projectName}`);
     } finally {
       hasLoadedProject.current = true;
     }
-  }, []);
+  }
+
+  function applyProjectData(project) {
+    const data = project.data || {};
+
+    setCurrentProjectId(project.id);
+    setCurrentProjectName(project.name || data.name || "");
+    setItems(Array.isArray(data.items) ? data.items : createInitialItems());
+    setWires(Array.isArray(data.wires) ? data.wires : []);
+    setSensorConfigs(data.sensorConfigs || {});
+    setZoom(data.zoom || 100);
+    setPort(data.port || "3001");
+    setApiEnabled(Boolean(data.apiEnabled));
+    setSelectedId(data.selectedId || null);
+    setLeftCollapsed(Boolean(data.leftCollapsed));
+    setRightCollapsed(Boolean(data.rightCollapsed));
+
+    localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, String(project.id));
+    localStorage.setItem(STORAGE_CURRENT_PROJECT_NAME, project.name || data.name || "");
+  }
+
+  async function loadProjectById(projectId, showLog = true) {
+    if (!projectId) return;
+
+    setIsLoadingProject(true);
+
+    try {
+      const response = await axios.get(`${PROJECT_API}/projects/${projectId}`);
+      applyProjectData(response.data);
+
+      if (showLog) {
+        setLogs((previous) => [
+          {
+            id: Date.now(),
+            status: "success",
+            method: "LOAD",
+            url: response.data.name,
+            time: new Date().toLocaleTimeString(),
+            message: "Projet chargé depuis SQLite.",
+          },
+          ...previous,
+        ]);
+      }
+    } catch {
+      localStorage.removeItem(STORAGE_CURRENT_PROJECT_ID);
+      setCurrentProjectId(null);
+      setLogs((previous) => [
+        {
+          id: Date.now(),
+          status: "error",
+          method: "LOAD",
+          url: `Projet ${projectId}`,
+          time: new Date().toLocaleTimeString(),
+          message: "Impossible de charger ce projet depuis SQLite.",
+        },
+        ...previous,
+      ]);
+    } finally {
+      setIsLoadingProject(false);
+    }
+  }
 
   useEffect(() => {
     setApiUrl(`http://localhost:${port}/api/iot/data`);
@@ -334,11 +354,13 @@ export default function App() {
 
   useEffect(() => {
     if (!hasLoadedProject.current) return;
-    if (!currentProjectName) return;
+    if (isLoadingProject) return;
+    if (!currentProjectId) return;
+    if (!projectApiReady) return;
 
     const timeout = setTimeout(() => {
       saveProject(false);
-    }, 500);
+    }, 650);
 
     return () => clearTimeout(timeout);
   }, [
@@ -351,7 +373,9 @@ export default function App() {
     selectedId,
     leftCollapsed,
     rightCollapsed,
-    currentProjectName,
+    currentProjectId,
+    projectApiReady,
+    isLoadingProject,
   ]);
 
   function buildProjectData(projectName = currentProjectName) {
@@ -371,25 +395,57 @@ export default function App() {
     };
   }
 
-  function saveProject(showLog = true) {
-    let projectName = currentProjectName;
+  async function refreshProjectList() {
+    try {
+      const response = await axios.get(`${PROJECT_API}/projects`);
+      setProjects(response.data || []);
+    } catch {
+      setProjectApiReady(false);
+    }
+  }
 
-    if (!projectName) {
-      const name = window.prompt("Nom du projet :");
-      if (!name) return;
-
-      projectName = safeProjectName(name);
-
-      if (!projectName) return;
-
-      setCurrentProjectName(projectName);
-      localStorage.setItem(STORAGE_CURRENT_PROJECT, projectName);
+  async function saveProject(showLog = true) {
+    if (!projectApiReady) {
+      setLogs((previous) => [
+        {
+          id: Date.now(),
+          status: "error",
+          method: "SAVE",
+          url: PROJECT_API,
+          time: new Date().toLocaleTimeString(),
+          message: "Sauvegarde impossible : backend Flask non lancé.",
+        },
+        ...previous,
+      ]);
+      return;
     }
 
-    const data = buildProjectData(projectName);
+    let projectId = currentProjectId;
+    let projectName = currentProjectName;
 
-    localStorage.setItem(STORAGE_CURRENT_PROJECT, projectName);
-    localStorage.setItem(`${STORAGE_PROJECT_PREFIX}${projectName}`, JSON.stringify(data));
+    if (!projectId) {
+      const name = window.prompt("Nom du projet :");
+      if (!name) return;
+      projectName = safeProjectName(name);
+      if (!projectName) return;
+
+      const response = await axios.post(`${PROJECT_API}/projects`, {
+        name: projectName,
+        data: buildProjectData(projectName),
+      });
+
+      projectId = response.data.id;
+      setCurrentProjectId(projectId);
+      setCurrentProjectName(response.data.name);
+      localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, String(projectId));
+      localStorage.setItem(STORAGE_CURRENT_PROJECT_NAME, response.data.name);
+      await refreshProjectList();
+    } else {
+      await axios.put(`${PROJECT_API}/projects/${projectId}`, {
+        name: projectName,
+        data: buildProjectData(projectName),
+      });
+    }
 
     if (showLog) {
       setLogs((previous) => [
@@ -399,24 +455,36 @@ export default function App() {
           method: "SAVE",
           url: projectName,
           time: new Date().toLocaleTimeString(),
-          message: "État du projet sauvegardé. Il sera restauré après actualisation.",
+          message: "Projet sauvegardé dans SQLite.",
         },
         ...previous,
       ]);
     }
   }
 
-  function createNewProject() {
-    const name = window.prompt("Nom du nouveau projet :");
+  async function createNewProject() {
+    if (!projectApiReady) {
+      setLogs((previous) => [
+        {
+          id: Date.now(),
+          status: "error",
+          method: "NEW",
+          url: PROJECT_API,
+          time: new Date().toLocaleTimeString(),
+          message: "Création impossible : lance d’abord dashboard/app.py.",
+        },
+        ...previous,
+      ]);
+      return;
+    }
 
+    const name = window.prompt("Nom du nouveau projet :");
     if (!name) return;
 
     const projectName = safeProjectName(name);
-
     if (!projectName) return;
 
     const initialItems = createInitialItems();
-
     const initialProject = {
       name: projectName,
       version: "1.0.0",
@@ -432,30 +500,53 @@ export default function App() {
       rightCollapsed: false,
     };
 
-    setCurrentProjectName(projectName);
-    setItems(initialItems);
-    setWires([]);
-    setSelectedId(null);
-    setZoom(100);
-    setSensorConfigs({});
-    setSensorDataByItem({});
-    setApiEnabled(false);
-    setLeftCollapsed(false);
-    setRightCollapsed(false);
-    setLogs((previous) => [
-      {
-        id: Date.now(),
-        status: "success",
-        method: "NEW",
-        url: projectName,
-        time: new Date().toLocaleTimeString(),
-        message: "Nouveau projet créé et sauvegardé.",
-      },
-      ...previous,
-    ]);
+    try {
+      const response = await axios.post(`${PROJECT_API}/projects`, {
+        name: projectName,
+        data: initialProject,
+      });
 
-    localStorage.setItem(STORAGE_CURRENT_PROJECT, projectName);
-    localStorage.setItem(`${STORAGE_PROJECT_PREFIX}${projectName}`, JSON.stringify(initialProject));
+      setCurrentProjectId(response.data.id);
+      setCurrentProjectName(response.data.name);
+      setItems(initialItems);
+      setWires([]);
+      setSelectedId(null);
+      setZoom(100);
+      setSensorConfigs({});
+      setSensorDataByItem({});
+      setApiEnabled(false);
+      setLeftCollapsed(false);
+      setRightCollapsed(false);
+
+      localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, String(response.data.id));
+      localStorage.setItem(STORAGE_CURRENT_PROJECT_NAME, response.data.name);
+
+      await refreshProjectList();
+
+      setLogs((previous) => [
+        {
+          id: Date.now(),
+          status: "success",
+          method: "NEW",
+          url: response.data.name,
+          time: new Date().toLocaleTimeString(),
+          message: "Nouveau projet créé dans SQLite.",
+        },
+        ...previous,
+      ]);
+    } catch (error) {
+      setLogs((previous) => [
+        {
+          id: Date.now(),
+          status: "error",
+          method: "NEW",
+          url: projectName,
+          time: new Date().toLocaleTimeString(),
+          message: error?.response?.data?.error || "Impossible de créer le projet.",
+        },
+        ...previous,
+      ]);
+    }
   }
 
   function updateSensorConfig(itemId, key, value) {
@@ -471,12 +562,7 @@ export default function App() {
   function toggleRpiPower(itemId) {
     setItems((previous) =>
       previous.map((item) =>
-        item.id === itemId
-          ? {
-              ...item,
-              powered: !item.powered,
-            }
-          : item
+        item.id === itemId ? { ...item, powered: !item.powered } : item
       )
     );
   }
@@ -498,13 +584,8 @@ export default function App() {
 
     try {
       await axios.post(apiUrl, payload);
-
       setLogs((previous) => [
-        {
-          ...logBase,
-          status: "success",
-          message: "Données envoyées avec succès",
-        },
+        { ...logBase, status: "success", message: "Données envoyées avec succès" },
         ...previous,
       ]);
     } catch {
@@ -512,8 +593,7 @@ export default function App() {
         {
           ...logBase,
           status: "error",
-          message:
-            "API non joignable. C’est normal si ton serveur externe n’est pas encore créé.",
+          message: "API non joignable. C’est normal si ton serveur externe n’est pas encore créé.",
         },
         ...previous,
       ]);
@@ -521,15 +601,15 @@ export default function App() {
   }
 
   function clearAll() {
-    const confirmClear = window.confirm(
-      "Voulez-vous vraiment vider l’éditeur ? Le projet courant sera sauvegardé vide."
-    );
-
+    const confirmClear = window.confirm("Voulez-vous vraiment vider l’éditeur ?");
     if (!confirmClear) return;
 
     setItems([]);
     setWires([]);
     setSelectedId(null);
+    setSensorConfigs({});
+    setSensorDataByItem({});
+    setPiConfigItemId(null);
     setLogs((previous) => [
       {
         id: Date.now(),
@@ -537,13 +617,10 @@ export default function App() {
         method: "CLEAR",
         url: currentProjectName || "éditeur",
         time: new Date().toLocaleTimeString(),
-        message: "Éditeur vidé. Cliquez sur Sauvegarder pour conserver cet état.",
+        message: "Éditeur vidé. La sauvegarde automatique va enregistrer cet état.",
       },
       ...previous,
     ]);
-    setSensorConfigs({});
-    setSensorDataByItem({});
-    setPiConfigItemId(null);
   }
 
   function handleApplyPiConfig() {
@@ -598,8 +675,12 @@ export default function App() {
         apiEnabled={apiEnabled}
         setApiEnabled={setApiEnabled}
         currentProjectName={currentProjectName}
+        currentProjectId={currentProjectId}
+        projects={projects}
+        projectApiReady={projectApiReady}
         onNewProject={createNewProject}
         onSaveProject={() => saveProject(true)}
+        onOpenProject={(id) => loadProjectById(Number(id), true)}
       />
 
       <div className={workspaceClassName}>

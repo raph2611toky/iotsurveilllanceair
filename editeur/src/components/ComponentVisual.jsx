@@ -88,6 +88,14 @@ function ComponentFrame({
     >
       {children}
 
+      {component.type !== "rpi5" && component.type !== "breadboard" && component.poweredIndicator && (
+        <div className="component-power-leds" aria-hidden="true">
+          {Array.from({ length: component.powerLedCount || 2 }).map((_, index) => (
+            <span key={`power-led-${component.type}-${index}`} />
+          ))}
+        </div>
+      )}
+
       {component.type !== "rpi5" && component.type !== "breadboard" && (
         <div className="component-male-header-layer" aria-hidden="true">
           {component.pins?.map((pin) => {
@@ -169,11 +177,16 @@ export default function ComponentVisual({
   sensorData = null,
   powered = false,
 }) {
-  const isActive = running || powered;
-  const liveValue = getLiveValue(component.type, sensorData, isActive);
+  const liveValue = getLiveValue(component.type, sensorData, running);
+
+  const visualComponent = {
+    ...component,
+    poweredIndicator: Boolean(powered),
+    powerLedCount: component.type === "oled" ? 3 : component.type === "relay" ? 1 : 2,
+  };
 
   const frameProps = {
-    component,
+    component: visualComponent,
     disabledPinKeys,
     onPinMouseDown,
     onPinMouseEnter,
@@ -187,7 +200,7 @@ export default function ComponentVisual({
           <RaspberryPi5Svg
             width={component.width}
             height={component.height}
-            running={isActive}
+            running={running}
             powered={powered}
           />
         </ComponentFrame>
@@ -294,7 +307,7 @@ export default function ComponentVisual({
           <BuzzerSvg
             width={component.width}
             height={component.height}
-            running={isActive}
+            running={powered}
           />
         </ComponentFrame>
       );
@@ -305,7 +318,7 @@ export default function ComponentVisual({
           <OledSvg
             width={component.width}
             height={component.height}
-            sensorData={isActive ? sensorData : null}
+            sensorData={running ? sensorData : null}
           />
         </ComponentFrame>
       );
@@ -330,7 +343,7 @@ export default function ComponentVisual({
             width={component.width}
             height={component.height}
             type={component.type}
-            running={isActive}
+            running={powered}
           />
         </ComponentFrame>
       );
