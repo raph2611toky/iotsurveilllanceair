@@ -9,6 +9,9 @@ function Header({
   setZoom,
   apiEnabled,
   setApiEnabled,
+  currentProjectName,
+  onNewProject,
+  onSaveProject,
 }) {
   function handleZoom(delta) {
     setZoom((value) => Math.min(200, Math.max(40, value + delta)));
@@ -22,7 +25,7 @@ function Header({
         <div>
           <h1>IoT Circuit Simulator</h1>
           <div className="brand-sub">
-            Raspberry Pi 5 · Capteurs · API REST
+            Projet : {currentProjectName || "Aucun projet"}
           </div>
         </div>
       </div>
@@ -30,21 +33,22 @@ function Header({
       <div className="tb-sep" />
 
       <div className="top-center">
+        <button className="tb-btn gold" onClick={onNewProject}>
+          Nouveau projet
+        </button>
+
+        <button className="tb-btn" onClick={onSaveProject}>
+          Sauvegarder
+        </button>
+
+        <div className="tb-sep" />
+
         <button
           className="tb-btn"
           onClick={() => handleZoom(-10)}
           title="Zoom arrière"
         >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-          >
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
+          −
         </button>
 
         <span className="zoom-value">{zoom}%</span>
@@ -54,17 +58,7 @@ function Header({
           onClick={() => handleZoom(10)}
           title="Zoom avant"
         >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-          >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
+          +
         </button>
 
         <div className="tb-sep" />

@@ -2510,3 +2510,30 @@ textarea {
 .wire-endpoint:hover {
   opacity: 1;
 }
+
+.rotate-handle {
+  position: absolute;
+  left: 50%;
+  top: -38px;
+  transform: translateX(-50%);
+  z-index: 130;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid white;
+  background: var(--gold);
+  color: #2b1c04;
+  font-weight: 900;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+}
+
+.rotate-handle:hover {
+  background: #e0b730;
+}
+
+.rotate-handle:active {
+  transform: translateX(-50%) scale(0.94);
+}
