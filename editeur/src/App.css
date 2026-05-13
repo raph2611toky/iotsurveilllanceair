@@ -2297,3 +2297,216 @@ textarea {
   user-select: none;
   pointer-events: none;
 }
+/* =========================================================
+   AJOUTS : HOVER INFO, ROTATION, ALIMENTATION, HEADERS MALES
+   ========================================================= */
+
+.placed-rotator {
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+  transition: transform 0.12s ease;
+}
+
+.component-info-card {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 12px);
+  transform: translateX(-50%) translateY(6px);
+  z-index: 240;
+  min-width: 185px;
+  max-width: 250px;
+  background: rgba(32, 20, 3, 0.96);
+  color: #fff4c7;
+  border: 1.5px solid var(--gold);
+  border-radius: 12px;
+  padding: 9px 11px;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.placed:hover .component-info-card {
+  animation: showComponentInfoOnly5s 5s ease forwards;
+}
+
+@keyframes showComponentInfoOnly5s {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+
+  6% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  88% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+}
+
+.component-info-card strong {
+  display: block;
+  font-size: 12px;
+  color: #ffffff;
+  margin-bottom: 4px;
+}
+
+.component-info-card span {
+  display: block;
+  font-size: 10px;
+  color: #f6e8b5;
+  line-height: 1.35;
+  margin-bottom: 6px;
+}
+
+.component-info-card em,
+.component-info-card b {
+  display: block;
+  font-style: normal;
+  font-size: 9px;
+  color: #c4ae72;
+  margin-top: 2px;
+}
+
+.component-info-card b.powered {
+  color: #86efac;
+}
+
+ .rotate-handle {
+  position: absolute;
+  z-index: 150;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  background: #2b1c04;
+  color: var(--gold-light);
+  font-weight: 900;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+
+.rotate-handle:hover {
+  background: var(--gold);
+  color: #2b1c04;
+}
+
+.rotate-once {
+  right: -15px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.rotate-once:hover {
+  transform: translateY(-50%) scale(1.12);
+}
+
+.component-power-leds {
+  position: absolute;
+  right: -8px;
+  top: -8px;
+  z-index: 160;
+  display: flex;
+  gap: 3px;
+  padding: 3px 5px;
+  background: rgba(32, 20, 3, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.component-power-leds span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+  animation: ledPulse 1.2s infinite ease-in-out;
+}
+
+.component-power-leds span:nth-child(2) {
+  background: #facc15;
+  box-shadow: 0 0 8px #facc15;
+  animation-delay: 0.18s;
+}
+
+.component-power-leds span:nth-child(3) {
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+  animation-delay: 0.36s;
+}
+
+@keyframes ledPulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+.component-male-header-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none;
+}
+
+.component-male-pin {
+  position: absolute;
+  width: 12px;
+  height: 15px;
+  transform: translate(-50%, -58%);
+  background: linear-gradient(#151515, #050505);
+  border: 1.4px solid #333;
+  border-bottom-color: currentColor;
+  border-radius: 3px 3px 2px 2px;
+  box-shadow: inset 0 -4px 0 rgba(255, 255, 255, 0.08), 0 2px 4px rgba(0, 0, 0, 0.28);
+}
+
+.component-male-pin::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 3.5px;
+  height: 8px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: #d8c16a;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.pin,
+.real-component-frame .pin {
+  z-index: 95 !important;
+}
+
+/* Manipulation plus facile des fils : large zone invisible, points visibles au survol seulement */
+.wire-hit-area {
+  stroke-width: 34 !important;
+}
+
+.wire-path {
+  stroke-width: 5.5 !important;
+}
+
+.wire-point,
+.wire-endpoint {
+  opacity: 0;
+}
+
+.wire-group:hover .wire-point,
+.wire-group:hover .wire-endpoint,
+.wire-point:hover,
+.wire-endpoint:hover {
+  opacity: 1;
+}

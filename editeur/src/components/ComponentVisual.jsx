@@ -88,6 +88,25 @@ function ComponentFrame({
     >
       {children}
 
+      {component.type !== "rpi5" && component.type !== "breadboard" && (
+        <div className="component-male-header-layer" aria-hidden="true">
+          {component.pins?.map((pin) => {
+            const pinKey = getPinUniqueKey(pin);
+            return (
+              <span
+                key={`male-${component.type}-${pinKey}`}
+                className="component-male-pin"
+                style={{
+                  left: pin.x,
+                  top: pin.y,
+                  borderColor: pin.color || "#8a6a22",
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
+
       {component.pins?.map((pin) => {
         const pinKey = getPinUniqueKey(pin);
 
@@ -150,7 +169,8 @@ export default function ComponentVisual({
   sensorData = null,
   powered = false,
 }) {
-  const liveValue = getLiveValue(component.type, sensorData, running);
+  const isActive = running || powered;
+  const liveValue = getLiveValue(component.type, sensorData, isActive);
 
   const frameProps = {
     component,
@@ -167,7 +187,7 @@ export default function ComponentVisual({
           <RaspberryPi5Svg
             width={component.width}
             height={component.height}
-            running={running}
+            running={isActive}
             powered={powered}
           />
         </ComponentFrame>
@@ -274,7 +294,7 @@ export default function ComponentVisual({
           <BuzzerSvg
             width={component.width}
             height={component.height}
-            running={running}
+            running={isActive}
           />
         </ComponentFrame>
       );
@@ -285,7 +305,7 @@ export default function ComponentVisual({
           <OledSvg
             width={component.width}
             height={component.height}
-            sensorData={running ? sensorData : null}
+            sensorData={isActive ? sensorData : null}
           />
         </ComponentFrame>
       );
@@ -310,7 +330,7 @@ export default function ComponentVisual({
             width={component.width}
             height={component.height}
             type={component.type}
-            running={running}
+            running={isActive}
           />
         </ComponentFrame>
       );
