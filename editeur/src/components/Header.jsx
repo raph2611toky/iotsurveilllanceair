@@ -5,6 +5,8 @@ function Header({
   clearAll,
   port,
   setPort,
+  projectApiHost,
+  setProjectApiHost,
   zoom,
   setZoom,
   apiEnabled,
@@ -105,13 +107,20 @@ function Header({
         </div>
 
         <input
+          className="host-input"
+          value={projectApiHost}
+          onChange={(event) => setProjectApiHost(event.target.value)}
+          title="Host du backend Flask"
+        />
+
+        <input
           className="port-input"
           value={port}
           onChange={(event) => setPort(event.target.value)}
           title="Port de l’API externe"
         />
 
-        <span className="port-badge">localhost:{port}</span>
+        <span className="port-badge">{projectApiHost}:{port}</span>
       </div>
     </header>
   );

@@ -89,7 +89,7 @@ function ComponentFrame({
       {children}
 
       {component.type !== "rpi5" && component.type !== "breadboard" && component.poweredIndicator && (
-        <div className="component-power-leds" aria-hidden="true">
+        <div className={`component-power-leds ${component.powerLedColor || "green"}`} aria-hidden="true">
           {Array.from({ length: component.powerLedCount || 2 }).map((_, index) => (
             <span key={`power-led-${component.type}-${index}`} />
           ))}
@@ -183,6 +183,10 @@ export default function ComponentVisual({
     ...component,
     poweredIndicator: Boolean(powered),
     powerLedCount: component.type === "oled" ? 3 : component.type === "relay" ? 1 : 2,
+    powerLedColor:
+      component.type === "mq2" || component.type === "led_r" ? "red" :
+      component.type === "oled" || component.type === "wifi" || component.type === "bluetooth" ? "blue" :
+      "green",
   };
 
   const frameProps = {

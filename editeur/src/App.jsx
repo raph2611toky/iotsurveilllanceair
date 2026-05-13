@@ -21,7 +21,8 @@ const DEFAULT_SENSOR_CONFIGS = {
   soil: { humidity: 55, variation: 12 },
 };
 
-const PROJECT_API = "http://127.0.0.1:5000/api";
+const DEFAULT_PROJECT_API_HOST = "127.0.0.1";
+const DEFAULT_PROJECT_API_PORT = "5000";
 const STORAGE_CURRENT_PROJECT_ID = "iot-editor-current-project-id";
 const STORAGE_CURRENT_PROJECT_NAME = "iot-editor-current-project-name";
 
@@ -187,8 +188,9 @@ export default function App() {
   const [sensorConfigs, setSensorConfigs] = useState({});
   const [sensorDataByItem, setSensorDataByItem] = useState({});
 
-  const [port, setPort] = useState("3001");
-  const [apiUrl, setApiUrl] = useState("http://localhost:3001/api/iot/data");
+  const [projectApiHost, setProjectApiHost] = useState(DEFAULT_PROJECT_API_HOST);
+  const [port, setPort] = useState(DEFAULT_PROJECT_API_PORT);
+  const [apiUrl, setApiUrl] = useState(`http://${DEFAULT_PROJECT_API_HOST}:${DEFAULT_PROJECT_API_PORT}/api`);
   const [apiEnabled, setApiEnabled] = useState(false);
   const [logs, setLogs] = useState([]);
 
@@ -210,16 +212,21 @@ export default function App() {
     return items.find((item) => item.id === piConfigItemId) || null;
   }, [items, piConfigItemId]);
 
+  const projectApiBaseUrl = `http://${projectApiHost}:${port}/api`;
+  const simulationEndpoint = currentProjectId
+    ? `${projectApiBaseUrl}/projects/${currentProjectId}/simulation-data`
+    : `${projectApiBaseUrl}/projects/<id>/simulation-data`;
+
   useEffect(() => {
     bootProjectSystem();
   }, []);
 
   async function bootProjectSystem() {
     try {
-      await axios.get(`${PROJECT_API}/health`);
+      await axios.get(`${projectApiBaseUrl}/health`);
       setProjectApiReady(true);
 
-      const projectsResponse = await axios.get(`${PROJECT_API}/projects`);
+      const projectsResponse = await axios.get(`${projectApiBaseUrl}/projects`);
       setProjects(projectsResponse.data || []);
 
       const savedProjectId = localStorage.getItem(STORAGE_CURRENT_PROJECT_ID);
@@ -238,7 +245,7 @@ export default function App() {
           id: Date.now(),
           status: "error",
           method: "DB",
-          url: PROJECT_API,
+          url: projectApiBaseUrl,
           time: new Date().toLocaleTimeString(),
           message: "Backend Flask non joignable. Lance dashboard/app.py pour charger/sauvegarder les projets.",
         },
@@ -258,7 +265,8 @@ export default function App() {
     setWires(Array.isArray(data.wires) ? data.wires : []);
     setSensorConfigs(data.sensorConfigs || {});
     setZoom(data.zoom || 100);
-    setPort(data.port || "3001");
+    setProjectApiHost(data.projectApiHost || DEFAULT_PROJECT_API_HOST);
+    setPort(data.port || DEFAULT_PROJECT_API_PORT);
     setApiEnabled(Boolean(data.apiEnabled));
     setSelectedId(data.selectedId || null);
     setLeftCollapsed(Boolean(data.leftCollapsed));
@@ -274,7 +282,7 @@ export default function App() {
     setIsLoadingProject(true);
 
     try {
-      const response = await axios.get(`${PROJECT_API}/projects/${projectId}`);
+      const response = await axios.get(`${projectApiBaseUrl}/projects/${projectId}`);
       applyProjectData(response.data);
 
       if (showLog) {
@@ -310,8 +318,8 @@ export default function App() {
   }
 
   useEffect(() => {
-    setApiUrl(`http://localhost:${port}/api/iot/data`);
-  }, [port]);
+    setApiUrl(projectApiBaseUrl);
+  }, [projectApiBaseUrl]);
 
   useEffect(() => {
     setSensorConfigs((previous) => {
@@ -350,7 +358,7 @@ export default function App() {
     }, 1600);
 
     return () => clearInterval(interval);
-  }, [running, apiEnabled, apiUrl, items, sensorConfigs]);
+  }, [running, apiEnabled, projectApiBaseUrl, currentProjectId, items, sensorConfigs]);
 
   useEffect(() => {
     if (!hasLoadedProject.current) return;
@@ -368,6 +376,7 @@ export default function App() {
     wires,
     sensorConfigs,
     zoom,
+    projectApiHost,
     port,
     apiEnabled,
     selectedId,
@@ -387,6 +396,7 @@ export default function App() {
       wires,
       sensorConfigs,
       zoom,
+      projectApiHost,
       port,
       apiEnabled,
       selectedId,
@@ -397,7 +407,7 @@ export default function App() {
 
   async function refreshProjectList() {
     try {
-      const response = await axios.get(`${PROJECT_API}/projects`);
+      const response = await axios.get(`${projectApiBaseUrl}/projects`);
       setProjects(response.data || []);
     } catch {
       setProjectApiReady(false);
@@ -411,7 +421,7 @@ export default function App() {
           id: Date.now(),
           status: "error",
           method: "SAVE",
-          url: PROJECT_API,
+          url: projectApiBaseUrl,
           time: new Date().toLocaleTimeString(),
           message: "Sauvegarde impossible : backend Flask non lancé.",
         },
@@ -429,7 +439,7 @@ export default function App() {
       projectName = safeProjectName(name);
       if (!projectName) return;
 
-      const response = await axios.post(`${PROJECT_API}/projects`, {
+      const response = await axios.post(`${projectApiBaseUrl}/projects`, {
         name: projectName,
         data: buildProjectData(projectName),
       });
@@ -441,7 +451,7 @@ export default function App() {
       localStorage.setItem(STORAGE_CURRENT_PROJECT_NAME, response.data.name);
       await refreshProjectList();
     } else {
-      await axios.put(`${PROJECT_API}/projects/${projectId}`, {
+      await axios.put(`${projectApiBaseUrl}/projects/${projectId}`, {
         name: projectName,
         data: buildProjectData(projectName),
       });
@@ -469,7 +479,7 @@ export default function App() {
           id: Date.now(),
           status: "error",
           method: "NEW",
-          url: PROJECT_API,
+          url: projectApiBaseUrl,
           time: new Date().toLocaleTimeString(),
           message: "Création impossible : lance d’abord dashboard/app.py.",
         },
@@ -501,7 +511,7 @@ export default function App() {
     };
 
     try {
-      const response = await axios.post(`${PROJECT_API}/projects`, {
+      const response = await axios.post(`${projectApiBaseUrl}/projects`, {
         name: projectName,
         data: initialProject,
       });
@@ -567,25 +577,66 @@ export default function App() {
     );
   }
 
-  async function sendData(dataOverride = sensorDataByItem, automatic = false) {
-    const payload = {
-      ...buildApiPayload(items, wires, dataOverride),
-      transmission: automatic ? "automatic" : "manual",
-      apiUrl,
+  function buildCompleteSimulationPayload(dataOverride = sensorDataByItem, automatic = false) {
+    return {
+      project: {
+        id: currentProjectId,
+        name: currentProjectName,
+        savedAt: new Date().toISOString(),
+      },
+      editor: {
+        items,
+        wires,
+        sensorConfigs,
+        zoom,
+        selectedId,
+        leftCollapsed,
+        rightCollapsed,
+      },
+      simulation: {
+        running,
+        transmission: automatic ? "automatic" : "manual",
+        sensorDataByItem: dataOverride,
+        summary: buildApiPayload(items, wires, dataOverride),
+        timestamp: new Date().toISOString(),
+      },
+      api: {
+        host: projectApiHost,
+        port,
+        baseUrl: projectApiBaseUrl,
+        endpoint: simulationEndpoint,
+      },
     };
+  }
+
+  async function sendData(dataOverride = sensorDataByItem, automatic = false) {
+    if (!currentProjectId) {
+      await saveProject(false);
+    }
+
+    const projectId = currentProjectId || Number(localStorage.getItem(STORAGE_CURRENT_PROJECT_ID));
+    const endpoint = projectId
+      ? `${projectApiBaseUrl}/projects/${projectId}/simulation-data`
+      : simulationEndpoint;
+
+    const payload = buildCompleteSimulationPayload(dataOverride, automatic);
 
     const logBase = {
       id: Date.now(),
       method: "POST",
-      url: apiUrl,
+      url: endpoint,
       payload,
       time: new Date().toLocaleTimeString(),
     };
 
     try {
-      await axios.post(apiUrl, payload);
+      await axios.post(endpoint, payload);
       setLogs((previous) => [
-        { ...logBase, status: "success", message: "Données envoyées avec succès" },
+        {
+          ...logBase,
+          status: "success",
+          message: "Informations complètes de simulation envoyées au backend Flask.",
+        },
         ...previous,
       ]);
     } catch {
@@ -593,7 +644,7 @@ export default function App() {
         {
           ...logBase,
           status: "error",
-          message: "API non joignable. C’est normal si ton serveur externe n’est pas encore créé.",
+          message: "Endpoint de simulation non joignable. Vérifie dashboard/app.py.",
         },
         ...previous,
       ]);
@@ -670,6 +721,8 @@ export default function App() {
         clearAll={clearAll}
         port={port}
         setPort={setPort}
+        projectApiHost={projectApiHost}
+        setProjectApiHost={setProjectApiHost}
         zoom={zoom}
         setZoom={setZoom}
         apiEnabled={apiEnabled}
@@ -730,6 +783,11 @@ export default function App() {
               running={running}
               logs={logs}
               apiUrl={apiUrl}
+              projectApiHost={projectApiHost}
+              projectApiPort={port}
+              projectApiBaseUrl={projectApiBaseUrl}
+              simulationEndpoint={simulationEndpoint}
+              currentProjectId={currentProjectId}
               apiEnabled={apiEnabled}
               setApiEnabled={setApiEnabled}
               openPiConfig={(itemId) => setPiConfigItemId(itemId)}

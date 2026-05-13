@@ -2557,3 +2557,121 @@ textarea {
 .project-select:focus {
   border-color: var(--gold);
 }
+
+/* =========================================================
+   LEDS D'ALIMENTATION INTÉGRÉES AUX COMPOSANTS
+   ========================================================= */
+
+.component-power-leds {
+  position: absolute !important;
+  left: 10px !important;
+  top: 9px !important;
+  right: auto !important;
+  z-index: 72 !important;
+  display: flex !important;
+  gap: 5px !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  pointer-events: none !important;
+}
+
+.component-power-leds span {
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50% !important;
+  border: 1px solid rgba(255, 255, 255, 0.75) !important;
+  background: #22c55e !important;
+  box-shadow:
+    0 0 0 2px rgba(34, 197, 94, 0.18),
+    0 0 8px rgba(34, 197, 94, 0.85) !important;
+  animation: componentLedGlow 1.45s infinite ease-in-out !important;
+}
+
+.component-power-leds.red span {
+  background: #ef4444 !important;
+  box-shadow:
+    0 0 0 2px rgba(239, 68, 68, 0.18),
+    0 0 8px rgba(239, 68, 68, 0.85) !important;
+}
+
+.component-power-leds.blue span {
+  background: #38bdf8 !important;
+  box-shadow:
+    0 0 0 2px rgba(56, 189, 248, 0.18),
+    0 0 8px rgba(56, 189, 248, 0.85) !important;
+}
+
+.component-power-leds span:nth-child(2) {
+  animation-delay: 0.18s !important;
+}
+
+.component-power-leds span:nth-child(3) {
+  animation-delay: 0.36s !important;
+}
+
+@keyframes componentLedGlow {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(0.78);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+/* =========================================================
+   API FLASK / SQLITE DANS LE PANNEAU DROIT
+   ========================================================= */
+
+.host-input {
+  width: 92px;
+  padding: 4px 7px;
+  border: 1px solid #4a3510;
+  border-radius: 6px;
+  background: #1a1006;
+  color: var(--gold-light);
+  font-family: monospace;
+  font-size: 10px;
+  outline: none;
+}
+
+.host-input:focus {
+  border-color: var(--gold);
+}
+
+.api-config-grid {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  gap: 6px 8px;
+  margin: 10px 0;
+  font-size: 11px;
+}
+
+.api-config-grid span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.api-config-grid strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Consolas, Monaco, monospace;
+  color: var(--text);
+}
+
+.api-endpoint-box {
+  margin: 8px 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: #1a1006;
+  color: #f6e8b5;
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
