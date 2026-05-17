@@ -81,6 +81,25 @@ function ComponentMiniVisual({ component }) {
         </div>
       )}
 
+      {component.type === "fan" && (
+        <div className="mini-fan">
+          <div className="mini-fan-blades">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        </div>
+      )}
+
+      {component.type === "cooler" && (
+        <div className="mini-cooler">
+          <div className="mini-cold-plate" />
+          <span />
+          <span />
+        </div>
+      )}
+
       {component.type === "oled" && (
         <div className="mini-oled">
           <div className="mini-screen" />

@@ -39,4 +39,22 @@ F13 → Vcc 5V
 E13 → GND
 A1 → GPIO2 SDA
 B1 → GPIO3 SCL
+
+LED rouge
+GPIO22 → Anode LED rouge
+Cathode LED rouge → GND
+
+LED verte
+GPIO23 → Anode LED verte
+Cathode LED verte → GND
+
+Ventilateur
+GPIO18 → IN/PWM ventilateur
+VCC ventilateur → 5V
+GND ventilateur → GND
+
+Refroidissement
+GPIO24 → IN module refroidissement
+VCC refroidissement → 5V ou alimentation externe
+GND refroidissement → GND commun
 ```

@@ -368,6 +368,49 @@ export const componentsData = {
     ]),
   },
 
+  fan: {
+    type: "fan",
+    name: "Ventilateur",
+    category: "Actionneurs",
+    description: "Ventilateur d’extraction d’air. Il se déclenche uniquement lorsque MQ-135 ou MQ-2 détecte gaz, pollution ou fumée.",
+    emoji: "FAN",
+    chipColor: "#0f766e",
+    chipBg: "#dcfce7",
+
+    // Cadre agrandi pour éviter la superposition des pins, du texte et du rendu visuel.
+    width: 190,
+    height: 150,
+
+    // Pins placées sur le côté gauche, comme les autres composants à connexion latérale.
+    // x reste très proche du bord, y est espacé pour éviter toute confusion visuelle.
+    pins: pins([
+      { key: "FAN-VCC", name: "VCC", label: "Ventilateur VCC 5V", x: 8, y: 46, color: "#ff0000" },
+      { key: "FAN-GND", name: "GND", label: "Ventilateur GND", x: 8, y: 76, color: "#222222" },
+      { key: "FAN-IN", name: "IN", label: "Ventilateur IN/PWM", x: 8, y: 106, color: "#ffaa00" },
+    ]),
+  },
+
+  cooler: {
+    type: "cooler",
+    name: "Module refroidissement",
+    category: "Actionneurs",
+    description: "Module de refroidissement ou Peltier. Il démarre lors d’un pic de température.",
+    emoji: "COOL",
+    chipColor: "#0ea5e9",
+    chipBg: "#e0f2fe",
+
+    // Cadre légèrement agrandi pour laisser une colonne propre aux pins.
+    width: 170,
+    height: 130,
+
+    // Pins latérales gauche : les fils partent proprement du bord sans couvrir le label.
+    pins: pins([
+      { key: "COOLER-VCC", name: "VCC", label: "Refroidissement VCC 5V", x: 8, y: 42, color: "#ff0000" },
+      { key: "COOLER-GND", name: "GND", label: "Refroidissement GND", x: 8, y: 68, color: "#222222" },
+      { key: "COOLER-IN", name: "IN", label: "Refroidissement IN", x: 8, y: 94, color: "#ffaa00" },
+    ]),
+  },
+
   buzzer: {
     type: "buzzer",
     name: "Buzzer",

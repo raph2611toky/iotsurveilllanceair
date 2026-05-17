@@ -321,6 +321,57 @@ function computePoweredItems(items, wires) {
   return poweredItemIds;
 }
 
+
+function ActuatorSimulationEffect({ item, running, data }) {
+  if (!running || !data?.active) return null;
+
+  if (item.type === "led_r" || item.type === "led_g") {
+    const colorClass = item.type === "led_r" ? "red" : "green";
+    return (
+      <div className={`actuator-effect led-effect ${colorClass}`}>
+        <span className="led-halo" />
+        <strong>{data.label || (item.type === "led_r" ? "CRITIQUE" : "PRÉ-CRITIQUE")}</strong>
+      </div>
+    );
+  }
+
+  if (item.type === "fan") {
+    return (
+      <div className="actuator-effect fan-effect">
+        <div className="fan-airflow">
+          <span />
+          <span />
+          <span />
+        </div>
+        <strong>{data.label || "EXTRACTION AIR"}</strong>
+      </div>
+    );
+  }
+
+  if (item.type === "cooler") {
+    return (
+      <div className="actuator-effect cooler-effect">
+        <div className="cooler-airflow">
+          <span />
+          <span />
+          <span />
+        </div>
+        <strong>{data.label || "REFROIDIR"}</strong>
+      </div>
+    );
+  }
+
+  if (item.type === "relay" || item.type === "buzzer") {
+    return (
+      <div className="actuator-effect fan-effect">
+        <strong>{data.label || "ACTION"}</strong>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function SensorSimulationEffect({ item, running, data }) {
   if (!running || !data) return null;
 
@@ -399,6 +450,7 @@ export default function EditorCanvas({
   setSelectedId,
   running,
   sensorDataByItem = {},
+  actuatorDataByItem = {},
   zoom,
   toggleRpiPower,
   openPiConfig,
@@ -1043,6 +1095,7 @@ export default function EditorCanvas({
           });
 
           const itemSensorData = sensorDataByItem[item.id];
+          const itemActuatorData = actuatorDataByItem[item.id];
 
           return (
             <div
@@ -1113,6 +1166,12 @@ export default function EditorCanvas({
                 data={itemSensorData}
               />
 
+              <ActuatorSimulationEffect
+                item={item}
+                running={running}
+                data={itemActuatorData}
+              />
+
               <ComponentVisual
                 component={component}
                 disabledPinKeys={disabledPinKeys}
@@ -1122,8 +1181,8 @@ export default function EditorCanvas({
                 onPinMouseEnter={(pin) => handlePinMouseEnter(item, pin)}
                 onPinMouseLeave={(pin) => handlePinMouseLeave(item, pin)}
                 running={running}
-                sensorData={itemSensorData}
-                powered={item.type === "rpi5" ? Boolean(item.powered) : poweredItemIds.has(item.id)}
+                sensorData={itemSensorData || itemActuatorData}
+                powered={item.type === "rpi5" ? Boolean(item.powered) : poweredItemIds.has(item.id) || Boolean(itemActuatorData?.active)}
               />
             </div>
           );

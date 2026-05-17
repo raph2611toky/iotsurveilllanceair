@@ -13,6 +13,8 @@ import {
   WifiSvg,
   RelaySvg,
   BuzzerSvg,
+  FanSvg,
+  CoolerSvg,
   OledSvg,
   ResistorSvg,
   LedSvg,
@@ -164,6 +166,11 @@ function getLiveValue(type, sensorData, running) {
     return `${sensorData.pressure || 1013} hPa`;
   }
 
+  if (type === "fan" || type === "cooler" || type === "relay" || type === "buzzer" || type === "led_r" || type === "led_g") {
+    if (sensorData.label) return sensorData.label;
+    return sensorData.active ? "ON" : "OFF";
+  }
+
   return null;
 }
 
@@ -184,8 +191,8 @@ export default function ComponentVisual({
     poweredIndicator: Boolean(powered),
     powerLedCount: component.type === "oled" ? 3 : component.type === "relay" ? 1 : 2,
     powerLedColor:
-      component.type === "mq2" || component.type === "led_r" ? "red" :
-      component.type === "oled" || component.type === "wifi" || component.type === "bluetooth" ? "blue" :
+      component.type === "mq2" || component.type === "led_r" || component.type === "buzzer" ? "red" :
+      component.type === "oled" || component.type === "wifi" || component.type === "bluetooth" || component.type === "cooler" ? "blue" :
       "green",
   };
 
@@ -312,6 +319,30 @@ export default function ComponentVisual({
             width={component.width}
             height={component.height}
             running={powered}
+          />
+        </ComponentFrame>
+      );
+
+    case "fan":
+      return (
+        <ComponentFrame {...frameProps}>
+          <FanSvg
+            width={component.width}
+            height={component.height}
+            running={powered}
+            liveValue={liveValue}
+          />
+        </ComponentFrame>
+      );
+
+    case "cooler":
+      return (
+        <ComponentFrame {...frameProps}>
+          <CoolerSvg
+            width={component.width}
+            height={component.height}
+            running={powered}
+            liveValue={liveValue}
           />
         </ComponentFrame>
       );

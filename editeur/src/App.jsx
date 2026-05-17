@@ -10,15 +10,30 @@ import PiConfigModal from "./components/PiConfigModal";
 import { componentsData } from "./data/componentsData";
 
 const SENSOR_TYPES = ["dht22", "mq135", "mq2", "bmp280", "pir", "pressure", "soil"];
+const ACTUATOR_TYPES = ["led_r", "led_g", "relay", "buzzer", "fan", "cooler"];
 
 const DEFAULT_SENSOR_CONFIGS = {
-  dht22: { temperature: 28, humidity: 65, variation: 4 },
-  mq135: { co2: 650, variation: 120 },
-  mq2: { smoke: 80, variation: 60 },
-  bmp280: { pressure: 1012, temperature: 27, variation: 8 },
+  // Pics critiques rendus volontairement plus fréquents pour tester rapidement
+  // les LEDs, le ventilateur, le refroidissement, le dashboard et les emails.
+  dht22: { temperature: 28, humidity: 65, variation: 4, warningChance: 0.24, criticalChance: 0.30 },
+  mq135: { co2: 650, variation: 120, warningChance: 0.24, criticalChance: 0.36 },
+  mq2: { smoke: 80, variation: 60, warningChance: 0.24, criticalChance: 0.34 },
+  bmp280: { pressure: 1012, temperature: 27, variation: 8, warningChance: 0.20, criticalChance: 0.26 },
   pir: { motion: false, variation: 1 },
   pressure: { pressure: 1013, variation: 20 },
   soil: { humidity: 55, variation: 12 },
+};
+
+const CRITICAL_SIMULATION_POLICY = {
+  // Appliqué même aux anciens projets déjà sauvegardés avec de faibles valeurs.
+  minWarningChance: 0.18,
+  minCriticalChance: 0.28,
+
+  // Si aucun capteur ne sort critique pendant un cycle, on force parfois
+  // un vrai pic critique sur un capteur compatible.
+  forceCriticalPulseChance: 0.38,
+
+  criticalTypes: ["dht22", "mq135", "mq2", "bmp280"],
 };
 
 const DEFAULT_PROJECT_API_HOST = import.meta.env.VITE_API_HOST || "127.0.0.1";
@@ -38,54 +53,151 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function randomBetween(min, max, dec = 1) {
+  return Number((Math.random() * (max - min) + min).toFixed(dec));
+}
+
+function simulationLevel(config = {}, forcedLevel = null) {
+  if (forcedLevel) return forcedLevel;
+
+  const configuredCriticalChance = Number(config.criticalChance ?? 0);
+  const configuredWarningChance = Number(config.warningChance ?? 0);
+
+  const criticalChance = clamp(
+    Math.max(configuredCriticalChance, CRITICAL_SIMULATION_POLICY.minCriticalChance),
+    0,
+    0.75
+  );
+
+  const warningChance = clamp(
+    Math.max(configuredWarningChance, CRITICAL_SIMULATION_POLICY.minWarningChance),
+    0,
+    Math.max(0, 1 - criticalChance)
+  );
+
+  const roll = Math.random();
+
+  if (roll < criticalChance) return "critical";
+  if (roll < criticalChance + warningChance) return "warning";
+  return "normal";
+}
+
+function boolFromThreshold(value, warning, critical) {
+  return {
+    isWarning: Number(value) >= warning,
+    isCritical: Number(value) >= critical,
+  };
+}
+
 function isSensor(type) {
   return SENSOR_TYPES.includes(type);
+}
+
+function isActuator(type) {
+  return ACTUATOR_TYPES.includes(type);
 }
 
 function createDefaultConfigFor(type) {
   return { ...(DEFAULT_SENSOR_CONFIGS[type] || {}) };
 }
 
-function generateSensorValue(type, config) {
+function generateSensorValue(type, config = {}, forcedLevel = null) {
+  const level = simulationLevel(config, forcedLevel);
+  const timestamp = new Date().toISOString();
+
   if (type === "dht22") {
+    let temperature = clamp(randAround(config.temperature ?? 28, config.variation ?? 4), -40, 80);
+    let humidity = clamp(randAround(config.humidity ?? 65, config.variation ?? 4), 0, 100);
+
+    if (level === "warning") {
+      temperature = randomBetween(32.5, 38.5, 1);
+      humidity = Math.random() > 0.5 ? randomBetween(76, 84, 1) : randomBetween(18, 24, 1);
+    }
+
+    if (level === "critical") {
+      temperature = randomBetween(40.5, 55, 1);
+      humidity = Math.random() > 0.5 ? randomBetween(90, 98, 1) : randomBetween(8, 14, 1);
+    }
+
     return {
       type,
-      temperature: clamp(randAround(config.temperature ?? 28, config.variation ?? 4), -40, 80),
-      humidity: clamp(randAround(config.humidity ?? 65, config.variation ?? 4), 0, 100),
+      level,
+      temperature,
+      humidity,
       unit: "°C / %",
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
   }
 
   if (type === "mq135") {
-    const co2 = clamp(randAround(config.co2 ?? 650, config.variation ?? 120, 0), 300, 2500);
+    let co2 = clamp(randAround(config.co2 ?? 650, config.variation ?? 120, 0), 300, 2500);
+
+    if (level === "warning") co2 = randomBetween(820, 1150, 0);
+    if (level === "critical") co2 = randomBetween(1220, 2400, 0);
+
+    const { isWarning, isCritical } = boolFromThreshold(co2, 800, 1200);
+
     return {
       type,
+      level: isCritical ? "critical" : isWarning ? "warning" : level,
       co2,
-      airQuality: co2 > 1000 ? "mauvaise" : co2 > 800 ? "moyenne" : "bonne",
+      co2_ppm: co2,
+      ppm: co2,
+      gasDetected: isWarning,
+      gas_detected: isWarning,
+      detected: isWarning,
+      digital_raw: isWarning ? 1 : 0,
+      airQuality: isCritical ? "critique" : isWarning ? "mauvaise" : "bonne",
       unit: "ppm",
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
   }
 
   if (type === "mq2") {
-    const smoke = clamp(randAround(config.smoke ?? 80, config.variation ?? 60, 0), 0, 1000);
+    let smoke = clamp(randAround(config.smoke ?? 80, config.variation ?? 60, 0), 0, 1000);
+
+    if (level === "warning") smoke = randomBetween(155, 285, 0);
+    if (level === "critical") smoke = randomBetween(310, 900, 0);
+
+    const { isWarning, isCritical } = boolFromThreshold(smoke, 150, 300);
+
     return {
       type,
+      level: isCritical ? "critical" : isWarning ? "warning" : level,
       smoke,
-      alert: smoke > 250,
+      smoke_ppm: smoke,
+      ppm: smoke,
+      alert: isCritical,
+      gasDetected: isWarning,
+      gas_detected: isWarning,
+      detected: isWarning,
+      digital_raw: isWarning ? 1 : 0,
       unit: "ppm",
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
   }
 
   if (type === "bmp280") {
+    let pressure = clamp(randAround(config.pressure ?? 1012, config.variation ?? 8, 0), 850, 1100);
+    let temperature = clamp(randAround(config.temperature ?? 27, 2, 1), -20, 80);
+
+    if (level === "warning") {
+      pressure = Math.random() > 0.5 ? randomBetween(1036, 1055, 0) : randomBetween(965, 979, 0);
+      temperature = randomBetween(32, 38, 1);
+    }
+
+    if (level === "critical") {
+      pressure = Math.random() > 0.5 ? randomBetween(1061, 1095, 0) : randomBetween(900, 949, 0);
+      temperature = randomBetween(40, 50, 1);
+    }
+
     return {
       type,
-      pressure: clamp(randAround(config.pressure ?? 1012, config.variation ?? 8, 0), 850, 1100),
-      temperature: clamp(randAround(config.temperature ?? 27, 2, 1), -20, 80),
+      level,
+      pressure,
+      temperature,
       unit: "hPa",
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
   }
 
@@ -95,7 +207,7 @@ function generateSensorValue(type, config) {
       type,
       motion: Boolean(config.motion) || randomMotion,
       label: Boolean(config.motion) || randomMotion ? "Mouvement" : "Calme",
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
   }
 
@@ -104,7 +216,7 @@ function generateSensorValue(type, config) {
       type,
       pressure: clamp(randAround(config.pressure ?? 1013, config.variation ?? 20, 0), 500, 2000),
       unit: "hPa",
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
   }
 
@@ -113,26 +225,214 @@ function generateSensorValue(type, config) {
       type,
       humidity: clamp(randAround(config.humidity ?? 55, config.variation ?? 12, 1), 0, 100),
       unit: "%",
-      timestamp: new Date().toISOString(),
+      timestamp,
     };
   }
 
-  return { type, timestamp: new Date().toISOString() };
+  return { type, timestamp };
+}
+
+function isCriticalSimulationValue(data) {
+  if (!data) return false;
+  if (data.level === "critical") return true;
+
+  return (
+    Number(data.temperature) >= 40 ||
+    Number(data.humidity) >= 90 ||
+    Number(data.humidity) <= 15 ||
+    Number(data.pressure) >= 1060 ||
+    Number(data.pressure) <= 950 ||
+    Number(data.co2 ?? data.co2_ppm ?? data.ppm) >= 1200 ||
+    Number(data.smoke ?? data.smoke_ppm ?? data.ppm) >= 300 ||
+    Boolean(data.alert)
+  );
 }
 
 function generateSensorDataByItem(items, sensorConfigs) {
   const result = {};
+  const criticalCandidateItems = [];
 
   items.forEach((item) => {
     if (!isSensor(item.type)) return;
+
     const config = sensorConfigs[item.id] || createDefaultConfigFor(item.type);
     result[item.id] = generateSensorValue(item.type, config);
+
+    if (CRITICAL_SIMULATION_POLICY.criticalTypes.includes(item.type)) {
+      criticalCandidateItems.push(item);
+    }
+  });
+
+  const hasCritical = Object.values(result).some(isCriticalSimulationValue);
+
+  if (
+    !hasCritical &&
+    criticalCandidateItems.length > 0 &&
+    Math.random() < CRITICAL_SIMULATION_POLICY.forceCriticalPulseChance
+  ) {
+    const randomIndex = Math.floor(Math.random() * criticalCandidateItems.length);
+    const item = criticalCandidateItems[randomIndex];
+    const config = sensorConfigs[item.id] || createDefaultConfigFor(item.type);
+    result[item.id] = generateSensorValue(item.type, config, "critical");
+  }
+
+  return result;
+}
+
+function getSensorMetrics(sensorDataByItem = {}) {
+  const values = Object.values(sensorDataByItem || {}).filter(Boolean);
+
+  const dht = values.find((entry) => entry.type === "dht22") || {};
+  const bmp = values.find((entry) => entry.type === "bmp280") || {};
+  const mq135 = values.find((entry) => entry.type === "mq135") || {};
+  const mq2 = values.find((entry) => entry.type === "mq2") || {};
+
+  const temperature = Number.isFinite(Number(dht.temperature))
+    ? Number(dht.temperature)
+    : Number.isFinite(Number(bmp.temperature))
+      ? Number(bmp.temperature)
+      : null;
+
+  const humidity = Number.isFinite(Number(dht.humidity)) ? Number(dht.humidity) : null;
+  const pressure = Number.isFinite(Number(bmp.pressure)) ? Number(bmp.pressure) : null;
+  const co2 = Number.isFinite(Number(mq135.co2)) ? Number(mq135.co2) : null;
+  const smoke = Number.isFinite(Number(mq2.smoke)) ? Number(mq2.smoke) : null;
+
+  return { temperature, humidity, pressure, co2, smoke, mq135, mq2 };
+}
+
+function evaluateSimulationState(sensorDataByItem = {}) {
+  const metrics = getSensorMetrics(sensorDataByItem);
+  const alerts = [];
+
+  if (metrics.temperature !== null) {
+    if (metrics.temperature >= 40) alerts.push({ level: "critical", source: "temperature", message: "Température critique" });
+    else if (metrics.temperature >= 32) alerts.push({ level: "warning", source: "temperature", message: "Température élevée" });
+  }
+
+  if (metrics.humidity !== null) {
+    if (metrics.humidity >= 90 || metrics.humidity <= 15) alerts.push({ level: "critical", source: "humidity", message: "Humidité critique" });
+    else if (metrics.humidity >= 75 || metrics.humidity <= 25) alerts.push({ level: "warning", source: "humidity", message: "Humidité proche du seuil" });
+  }
+
+  if (metrics.pressure !== null) {
+    if (metrics.pressure >= 1060 || metrics.pressure <= 950) alerts.push({ level: "critical", source: "pressure", message: "Pression critique" });
+    else if (metrics.pressure >= 1035 || metrics.pressure <= 980) alerts.push({ level: "warning", source: "pressure", message: "Pression inhabituelle" });
+  }
+
+  const mq135Detected = Boolean(metrics.mq135.gasDetected || metrics.mq135.gas_detected || metrics.mq135.detected);
+  const mq2Detected = Boolean(metrics.mq2.gasDetected || metrics.mq2.gas_detected || metrics.mq2.detected || metrics.mq2.alert);
+
+  if (metrics.co2 !== null) {
+    if (metrics.co2 >= 1200) alerts.push({ level: "critical", source: "mq135", message: "Qualité de l’air critique" });
+    else if (metrics.co2 >= 800 || mq135Detected) alerts.push({ level: "warning", source: "mq135", message: "Gaz/pollution détecté" });
+  } else if (mq135Detected) {
+    alerts.push({ level: "warning", source: "mq135", message: "Gaz/pollution détecté" });
+  }
+
+  if (metrics.smoke !== null) {
+    if (metrics.smoke >= 300 || metrics.mq2.alert) alerts.push({ level: "critical", source: "mq2", message: "Fumée/gaz critique" });
+    else if (metrics.smoke >= 150 || mq2Detected) alerts.push({ level: "warning", source: "mq2", message: "Fumée/gaz détecté" });
+  } else if (mq2Detected) {
+    alerts.push({ level: "warning", source: "mq2", message: "Fumée/gaz détecté" });
+  }
+
+  const status = alerts.some((alert) => alert.level === "critical")
+    ? "critical"
+    : alerts.some((alert) => alert.level === "warning")
+      ? "warning"
+      : "normal";
+
+  return { status, alerts, metrics };
+}
+
+function generateActuatorDataByItem(items, sensorDataByItem = {}) {
+  const result = {};
+  const analysis = evaluateSimulationState(sensorDataByItem);
+  const { status, metrics } = analysis;
+
+  const temperature = metrics.temperature;
+  const co2 = metrics.co2;
+  const smoke = metrics.smoke;
+  const mq135Detected = Boolean(metrics.mq135.gasDetected || metrics.mq135.gas_detected || metrics.mq135.detected);
+  const mq2Detected = Boolean(metrics.mq2.gasDetected || metrics.mq2.gas_detected || metrics.mq2.detected || metrics.mq2.alert);
+
+  const temperatureWarning = temperature !== null && temperature >= 32;
+  const temperatureCritical = temperature !== null && temperature >= 40;
+  const gasWarning = mq135Detected || mq2Detected || (co2 ?? 0) >= 800 || (smoke ?? 0) >= 150;
+  const gasCritical = (co2 ?? 0) >= 1200 || (smoke ?? 0) >= 300 || Boolean(metrics.mq2.alert);
+
+  items.forEach((item) => {
+    if (!isActuator(item.type)) return;
+
+    let active = false;
+    let label = "OFF";
+    let reason = "Aucune réaction nécessaire.";
+    let intensity = 0;
+    let reactionStatus = status;
+
+    if (item.type === "led_r") {
+      active = status === "critical";
+      label = active ? "CRITIQUE" : "OFF";
+      reason = active ? "Au moins une valeur a dépassé un seuil critique." : "Pas d’état critique.";
+      intensity = active ? 100 : 0;
+    } else if (item.type === "led_g") {
+      active = status === "warning";
+      label = active ? "PRÉ-CRITIQUE" : "OFF";
+      reason = active ? "Une valeur monte vers un seuil critique." : "Pas de pré-alerte.";
+      intensity = active ? 75 : 0;
+    } else if (item.type === "buzzer") {
+      active = status === "critical";
+      label = active ? "ALARME" : "OFF";
+      reason = active ? "Signal sonore activé en état critique." : "Buzzer en attente.";
+      intensity = active ? 100 : 0;
+    } else if (item.type === "relay") {
+      active = status === "critical";
+      label = active ? "RELAIS ON" : "OFF";
+      reason = active ? "Relais fermé pour alimenter une réaction de sécurité." : "Relais ouvert.";
+      intensity = active ? 100 : 0;
+    } else if (item.type === "fan") {
+      active = gasWarning;
+      label = active ? (gasCritical ? "EXTRACTION MAX" : "EXTRACTION AIR") : "OFF";
+      reason = active
+        ? "Gaz/fumée détecté : le ventilateur renouvelle l’air."
+        : "Aucune fumée ni pollution détectée.";
+      intensity = active ? (gasCritical ? 100 : 70) : 0;
+      reactionStatus = gasCritical ? "critical" : gasWarning ? "warning" : "normal";
+    } else if (item.type === "cooler") {
+      active = temperatureWarning;
+      label = active ? (temperatureCritical ? "FROID MAX" : "REFROIDIR") : "OFF";
+      reason = active
+        ? "Pic de température détecté : refroidissement activé."
+        : "Température dans la zone normale.";
+      intensity = active ? (temperatureCritical ? 100 : 65) : 0;
+      reactionStatus = temperatureCritical ? "critical" : temperatureWarning ? "warning" : "normal";
+    }
+
+    result[item.id] = {
+      type: item.type,
+      active,
+      label,
+      reason,
+      intensity,
+      status: reactionStatus,
+      triggers: {
+        temperature,
+        co2,
+        smoke,
+        temperatureWarning,
+        temperatureCritical,
+        gasWarning,
+        gasCritical,
+      },
+      timestamp: new Date().toISOString(),
+    };
   });
 
   return result;
 }
 
-function buildApiPayload(items, wires, sensorDataByItem) {
+function buildApiPayload(items, wires, sensorDataByItem, actuatorDataByItem = {}) {
   const sensors = items
     .filter((item) => isSensor(item.type))
     .map((item) => ({
@@ -142,6 +442,16 @@ function buildApiPayload(items, wires, sensorDataByItem) {
       data: sensorDataByItem[item.id] || null,
     }));
 
+  const actuators = items
+    .filter((item) => isActuator(item.type))
+    .map((item) => ({
+      itemId: item.id,
+      type: item.type,
+      name: componentsData[item.type]?.name || item.type,
+      data: actuatorDataByItem[item.id] || null,
+    }));
+
+  const analysis = evaluateSimulationState(sensorDataByItem);
   const raspberryPi = items.find((item) => item.type === "rpi5");
 
   return {
@@ -156,7 +466,9 @@ function buildApiPayload(items, wires, sensorDataByItem) {
       color: wire.color,
       points: wire.points || [],
     })),
-    status: sensors.some((sensor) => sensor.data?.alert) ? "danger" : "normal",
+    actuators,
+    status: analysis.status,
+    alerts: analysis.alerts,
     timestamp: new Date().toISOString(),
   };
 }
@@ -219,6 +531,10 @@ export default function App() {
   const [raspberryPiCode, setRaspberryPiCode] = useState(() => localStorage.getItem(STORAGE_RPI_CODE) || "");
   const [projectApiReady, setProjectApiReady] = useState(false);
   const [isLoadingProject, setIsLoadingProject] = useState(false);
+
+  const actuatorDataByItem = useMemo(() => {
+    return generateActuatorDataByItem(items, sensorDataByItem);
+  }, [items, sensorDataByItem]);
 
   const selectedItem = useMemo(() => {
     return items.find((item) => item.id === selectedId) || null;
@@ -633,6 +949,8 @@ export default function App() {
   }
 
   function buildCompleteSimulationPayload(dataOverride = sensorDataByItem, automatic = false) {
+    const nextActuatorData = generateActuatorDataByItem(items, dataOverride);
+
     return {
       project: {
         id: currentProjectId,
@@ -652,7 +970,8 @@ export default function App() {
         running,
         transmission: automatic ? "automatic" : "manual",
         sensorDataByItem: dataOverride,
-        summary: buildApiPayload(items, wires, dataOverride),
+        actuatorDataByItem: nextActuatorData,
+        summary: buildApiPayload(items, wires, dataOverride, nextActuatorData),
         timestamp: new Date().toISOString(),
       },
       api: {
@@ -864,6 +1183,7 @@ export default function App() {
           setSelectedId={setSelectedId}
           running={running}
           sensorDataByItem={sensorDataByItem}
+          actuatorDataByItem={actuatorDataByItem}
           zoom={zoom}
           toggleRpiPower={toggleRpiPower}
           openPiConfig={(itemId) => setPiConfigItemId(itemId)}
@@ -885,6 +1205,7 @@ export default function App() {
               wires={wires}
               sensorConfigs={sensorConfigs}
               sensorDataByItem={sensorDataByItem}
+              actuatorDataByItem={actuatorDataByItem}
               updateSensorConfig={updateSensorConfig}
               running={running}
               logs={logs}

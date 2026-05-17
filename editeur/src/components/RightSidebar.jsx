@@ -2,9 +2,14 @@ import { useMemo, useState } from "react";
 import { componentsData } from "../data/componentsData";
 
 const SENSOR_TYPES = ["dht22", "mq135", "mq2", "bmp280", "pir", "pressure", "soil"];
+const ACTUATOR_TYPES = ["led_r", "led_g", "relay", "buzzer", "fan", "cooler"];
 
 function isSensor(type) {
   return SENSOR_TYPES.includes(type);
+}
+
+function isActuator(type) {
+  return ACTUATOR_TYPES.includes(type);
 }
 
 function SensorConfigCard({ item, config, data, updateSensorConfig }) {
@@ -23,6 +28,17 @@ function SensorConfigCard({ item, config, data, updateSensorConfig }) {
           onChange={(event) => updateSensorConfig(item.id, key, Number(event.target.value))}
         />
       </label>
+    );
+  }
+
+  function criticalScenarioControls() {
+    return (
+      <div className="critical-scenario-box">
+        <strong>Scénarios de simulation</strong>
+        <p>Les pics critiques sont maintenant plus fréquents afin de tester rapidement les LEDs, le ventilateur, le refroidissement, le dashboard et les emails.</p>
+        {inputNumber("warningChance", "Chance pré-critique (0 à 1)", 0, 1, 0.01)}
+        {inputNumber("criticalChance", "Chance critique fréquente (0 à 1)", 0, 1, 0.01)}
+      </div>
     );
   }
 
@@ -88,10 +104,28 @@ function SensorConfigCard({ item, config, data, updateSensorConfig }) {
         </label>
       )}
 
+      {!["pir", "pressure", "soil"].includes(item.type) && criticalScenarioControls()}
+
       <div className="sensor-live-preview">
         <span>Valeur actuelle</span>
         <pre>{JSON.stringify(data || {}, null, 2)}</pre>
       </div>
+    </div>
+  );
+}
+
+function ActuatorStatusCard({ item, data }) {
+  const component = componentsData[item.type];
+  const active = Boolean(data?.active);
+
+  return (
+    <div className={active ? "actuator-status-card on" : "actuator-status-card"}>
+      <div className="actuator-status-head">
+        <strong>{component?.name || item.type}</strong>
+        <span className="actuator-state-pill">{active ? data?.label || "ON" : "OFF"}</span>
+      </div>
+      <p>{data?.reason || "En attente des conditions de réaction."}</p>
+      <small>Intensité : {data?.intensity ?? 0}% · ID : {item.id}</small>
     </div>
   );
 }
@@ -199,6 +233,7 @@ export default function RightSidebar({
   wires,
   sensorConfigs,
   sensorDataByItem,
+  actuatorDataByItem = {},
   updateSensorConfig,
   running,
   logs,
@@ -214,6 +249,7 @@ export default function RightSidebar({
   const [tab, setTab] = useState("simulation");
 
   const sensors = useMemo(() => items.filter((item) => isSensor(item.type)), [items]);
+  const actuators = useMemo(() => items.filter((item) => isActuator(item.type)), [items]);
 
   return (
     <aside className="right-sidebar">
@@ -245,6 +281,19 @@ export default function RightSidebar({
                 updateSensorConfig={updateSensorConfig}
               />
             ))}
+
+            <div className="panel-section">
+              <h2>Réactions automatiques</h2>
+              <p>LED rouge = critique, LED verte = pré-critique. Le refroidissement démarre sur pic de température. Le ventilateur démarre sur détection gaz/fumée.</p>
+              {actuators.length === 0 && <p>Aucun actionneur de réaction ajouté.</p>}
+              {actuators.map((item) => (
+                <ActuatorStatusCard
+                  key={item.id}
+                  item={item}
+                  data={actuatorDataByItem[item.id]}
+                />
+              ))}
+            </div>
 
             <div className="panel-section"><ConnectionGuide wires={wires} /></div>
           </>

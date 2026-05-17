@@ -132,27 +132,43 @@ export function ResistorSvg({ width, height, type }) {
 
 export function LedSvg({ width, height, type, running }) {
   const isGreen = type === "led_g";
-  const color = isGreen ? "#1e7a34" : "#b52020";
+  const color = isGreen ? "#16a34a" : "#dc2626";
+  const dark = isGreen ? "#14532d" : "#7f1d1d";
+  const glow = isGreen ? "rgba(34,197,94,.45)" : "rgba(239,68,68,.48)";
+  const cx = width / 2;
 
   return (
     <SvgBase width={width} height={height} className="svg-led">
       <defs>
-        <radialGradient id={`ledReal-${type}`} cx="35%" cy="30%">
+        <radialGradient id={`ledReal-${type}`} cx="35%" cy="25%">
           <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="60%" stopColor={running ? color : "rgba(255,255,255,.45)"} />
-          <stop offset="100%" stopColor={color} />
+          <stop offset="35%" stopColor={running ? "#fefce8" : "rgba(255,255,255,.65)"} />
+          <stop offset="72%" stopColor={running ? color : "rgba(255,255,255,.35)"} />
+          <stop offset="100%" stopColor={dark} />
         </radialGradient>
+        <filter id={`ledGlow-${type}`} x="-80%" y="-80%" width="260%" height="260%">
+          <feGaussianBlur stdDeviation="5" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
 
-      {running && <circle cx={width / 2} cy="23" r="24" fill={isGreen ? "rgba(30,122,52,.15)" : "rgba(181,32,32,.15)"} />}
+      {running && <circle cx={cx} cy="24" r="28" fill={glow} filter={`url(#ledGlow-${type})`} />}
+      {running && <circle cx={cx} cy="24" r="18" fill={glow} opacity=".55" />}
+
       <path
-        d={`M ${width / 2 - 13} 24 Q ${width / 2} 2 ${width / 2 + 13} 24 L ${width / 2 + 9} 41 L ${width / 2 - 9} 41 Z`}
+        d={`M ${cx - 14} 25 Q ${cx} 1 ${cx + 14} 25 L ${cx + 10} 42 L ${cx - 10} 42 Z`}
         fill={`url(#ledReal-${type})`}
-        stroke={color}
+        stroke={running ? color : dark}
         strokeWidth="3"
       />
-      <line x1={width / 2 - 7} y1="42" x2={width / 2 - 7} y2={height} stroke="#aaa" strokeWidth="2" />
-      <line x1={width / 2 + 7} y1="42" x2={width / 2 + 7} y2={height} stroke="#aaa" strokeWidth="2" />
+      <path d={`M ${cx - 8} 17 Q ${cx - 2} 8 ${cx + 5} 14`} stroke="rgba(255,255,255,.85)" strokeWidth="3" fill="none" strokeLinecap="round" />
+      <rect x={cx - 14} y="39" width="28" height="7" rx="3" fill="#d1d5db" stroke="#9ca3af" />
+      <line x1={cx - 8} y1="46" x2={cx - 8} y2={height} stroke="#9ca3af" strokeWidth="2.4" />
+      <line x1={cx + 8} y1="46" x2={cx + 8} y2={height} stroke="#9ca3af" strokeWidth="2.4" />
+      <Text x={cx} y="60" size="6" fill={dark}>{isGreen ? "PRE" : "CRIT"}</Text>
     </SvgBase>
   );
 }
@@ -172,6 +188,139 @@ export function JumperSvg({ width, height }) {
       <rect x={width - 29} y="13" width="25" height="18" rx="3" fill="#111" stroke="#444" strokeWidth="1.5" />
       <rect x={width - 29} y="33" width="25" height="18" rx="3" fill="#111" stroke="#444" strokeWidth="1.5" />
       <rect x={width - 29} y="53" width="25" height="18" rx="3" fill="#111" stroke="#444" strokeWidth="1.5" />
+    </SvgBase>
+  );
+}
+
+
+export function FanSvg({ width, height, running, liveValue }) {
+  // Zone de pins à gauche : le ventilateur est volontairement décalé à droite.
+  const cx = width / 2 + 14;
+  const cy = height / 2 + 4;
+  const outerR = Math.min(width - 34, height) * 0.36;
+  const bladeColor = running ? "#020617" : "#1f2937";
+
+  return (
+    <SvgBase width={width} height={height} className="svg-fan">
+      <defs>
+        <radialGradient id="fanSteelBody" cx="42%" cy="35%">
+          <stop offset="0%" stopColor="#f8fafc" />
+          <stop offset="45%" stopColor="#334155" />
+          <stop offset="100%" stopColor="#020617" />
+        </radialGradient>
+        <linearGradient id="fanFrameGradient" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="55%" stopColor="#f1f5f9" />
+          <stop offset="100%" stopColor="#dbeafe" />
+        </linearGradient>
+        <filter id="fanRunningGlow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="5" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+
+      <rect x="2" y="2" width={width - 4} height={height - 4} rx="20" fill="url(#fanFrameGradient)" stroke="#0f172a" strokeWidth="2.4" />
+
+      {/* Couloir propre réservé aux pins : aucune icône ni texte ne vient dessus. */}
+      <rect x="4" y="12" width="22" height={height - 24} rx="11" fill="rgba(15, 23, 42, .045)" stroke="rgba(15, 23, 42, .08)" />
+      <Text x="17" y="28" size="6" fill="#64748b">PIN</Text>
+
+      {running && <ellipse cx={cx} cy={cy} rx={outerR + 17} ry={outerR + 13} fill="rgba(20,184,166,.18)" filter="url(#fanRunningGlow)" />}
+
+      <ellipse cx={cx} cy={cy} rx={outerR + 13} ry={outerR + 9} fill="#0f172a" />
+      <ellipse cx={cx} cy={cy} rx={outerR + 6} ry={outerR + 3} fill="#111827" stroke="#334155" strokeWidth="2" />
+      <ellipse cx={cx} cy={cy} rx={outerR - 1} ry={outerR - 5} fill="#e5e7eb" stroke="#020617" strokeWidth="2.5" />
+      <ellipse cx={cx} cy={cy} rx={outerR - 8} ry={outerR - 12} fill="#0b1120" />
+
+      {Array.from({ length: 10 }).map((_, i) => {
+        const a = (Math.PI * 2 * i) / 10;
+        const x1 = cx + Math.cos(a) * 9;
+        const y1 = cy + Math.sin(a) * 7;
+        const x2 = cx + Math.cos(a) * (outerR - 4);
+        const y2 = cy + Math.sin(a) * (outerR - 9);
+        return <line key={`fan-grille-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#94a3b8" strokeWidth="1.2" opacity=".86" />;
+      })}
+
+      {Array.from({ length: 4 }).map((_, i) => (
+        <ellipse key={`fan-ring-${i}`} cx={cx} cy={cy} rx={outerR - 12 - i * 7} ry={outerR - 15 - i * 6} fill="none" stroke="#94a3b8" strokeWidth="1" opacity=".74" />
+      ))}
+
+      <g transform={`rotate(${running ? 18 : 0} ${cx} ${cy})`}>
+        {running && <animateTransform attributeName="transform" type="rotate" from={`0 ${cx} ${cy}`} to={`360 ${cx} ${cy}`} dur="0.42s" repeatCount="indefinite" />}
+        {Array.from({ length: 7 }).map((_, i) => (
+          <path
+            key={`fan-blade-${i}`}
+            d={`M ${cx} ${cy} C ${cx + 12} ${cy - 31}, ${cx + 35} ${cy - 25}, ${cx + 24} ${cy - 3} C ${cx + 17} ${cy + 9}, ${cx + 7} ${cy + 8}, ${cx} ${cy} Z`}
+            fill={bladeColor}
+            opacity=".95"
+            transform={`rotate(${i * (360 / 7)} ${cx} ${cy})`}
+          />
+        ))}
+      </g>
+
+      <circle cx={cx} cy={cy} r="13" fill="#111827" stroke="#475569" strokeWidth="2" />
+      <circle cx={cx} cy={cy} r="5" fill={running ? "#2dd4bf" : "#cbd5e1"} />
+
+      {/* Label compact placé en haut/droite pour ne jamais croiser les pins. */}
+      <Text x={width - 80} y={height - 138} size="7" fill="#0f766e">FAN</Text>
+      {liveValue && <LiveBox x={width - 58} y="37" value={liveValue} color="#0f766e" width="72" />}
+    </SvgBase>
+  );
+}
+
+export function CoolerSvg({ width, height, running, liveValue }) {
+  // Zone de pins à gauche : le bloc froid est décalé à droite.
+  const cx = width / 2 + 12;
+  const cy = height / 2;
+
+  return (
+    <SvgBase width={width} height={height} className="svg-cooler">
+      <defs>
+        <linearGradient id="coolerHeatSink" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stopColor="#f0f9ff" />
+          <stop offset="45%" stopColor="#7dd3fc" />
+          <stop offset="100%" stopColor="#0369a1" />
+        </linearGradient>
+        <linearGradient id="coolerPanelGradient" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="60%" stopColor="#eff6ff" />
+          <stop offset="100%" stopColor="#dbeafe" />
+        </linearGradient>
+        <radialGradient id="coolerColdGlow" cx="50%" cy="45%">
+          <stop offset="0%" stopColor="rgba(224,242,254,.95)" />
+          <stop offset="65%" stopColor="rgba(56,189,248,.28)" />
+          <stop offset="100%" stopColor="transparent" />
+        </radialGradient>
+      </defs>
+
+      <rect x="2" y="2" width={width - 4} height={height - 4} rx="18" fill="url(#coolerPanelGradient)" stroke="#0284c7" strokeWidth="2.5" />
+      <rect x="4" y="12" width="22" height={height - 24} rx="11" fill="rgba(14, 165, 233, .06)" stroke="rgba(14, 165, 233, .14)" />
+      <Text x="17" y="28" size="6" fill="#0284c7">PIN</Text>
+
+      {running && <ellipse cx={cx} cy={cy + 2} rx="58" ry="35" fill="url(#coolerColdGlow)" />}
+
+      <rect x="38" y="28" width={width - 58} height="50" rx="10" fill="url(#coolerHeatSink)" stroke="#075985" strokeWidth="2.5" />
+      {Array.from({ length: 7 }).map((_, i) => (
+        <rect key={`cooler-fin-${i}`} x={46 + i * 13} y="31" width="5" height="44" rx="2" fill="rgba(255,255,255,.58)" stroke="rgba(7,89,133,.25)" />
+      ))}
+
+      <rect x={cx - 23} y="37" width="46" height="30" rx="6" fill="rgba(2,132,199,.18)" stroke="#bae6fd" strokeWidth="2" />
+      <path d={`M ${cx} 39 L ${cx} 65 M ${cx - 15} 45 L ${cx + 15} 59 M ${cx + 15} 45 L ${cx - 15} 59`} stroke="#e0f2fe" strokeWidth="3" strokeLinecap="round" />
+      <circle cx={cx} cy="52" r="5" fill="#e0f2fe" />
+
+      {running && (
+        <g opacity=".95">
+          <path d="M 30 18 C 18 31, 20 54, 33 65" fill="none" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" />
+          <path d={`M ${width - 12} 18 C ${width + 2} 31, ${width - 3} 54, ${width - 20} 65`} fill="none" stroke="#38bdf8" strokeWidth="3" strokeLinecap="round" />
+          <path d={`M 40 ${height - 18} C ${cx - 24} ${height - 2}, ${cx + 24} ${height - 2}, ${width - 18} ${height - 18}`} fill="none" stroke="#7dd3fc" strokeWidth="3" strokeLinecap="round" />
+        </g>
+      )}
+
+      <Text x={width - 58} y="20" size="7" fill="#0369a1">COOL</Text>
+      {liveValue && <LiveBox x={width - 58} y="37" value={liveValue} color="#0369a1" width="76" />}
     </SvgBase>
   );
 }

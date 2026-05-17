@@ -2751,3 +2751,374 @@ textarea {
 .wire-group.moving .wire-path {
   filter: drop-shadow(0 0 10px rgba(34, 197, 94, 0.55));
 }
+
+/* =========================================================
+   ACTIONNEURS DE RÉACTION : ventilateur / refroidissement
+   ========================================================= */
+
+.mini-fan {
+  width: 31px;
+  height: 31px;
+  border-radius: 50%;
+  background: #dcfce7;
+  border: 2px solid #0f766e;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.mini-fan-blades {
+  width: 22px;
+  height: 22px;
+  position: relative;
+  animation: miniFanSpin 1.2s linear infinite;
+}
+
+.mini-fan-blades span {
+  position: absolute;
+  left: 9px;
+  top: 1px;
+  width: 5px;
+  height: 11px;
+  border-radius: 8px 8px 2px 2px;
+  background: #0f766e;
+  transform-origin: 2.5px 10px;
+}
+
+.mini-fan-blades span:nth-child(2) { transform: rotate(90deg); }
+.mini-fan-blades span:nth-child(3) { transform: rotate(180deg); }
+.mini-fan-blades span:nth-child(4) { transform: rotate(270deg); }
+
+@keyframes miniFanSpin {
+  to { transform: rotate(360deg); }
+}
+
+.mini-cooler {
+  width: 34px;
+  height: 28px;
+  border-radius: 6px;
+  border: 2px solid #0ea5e9;
+  background: #e0f2fe;
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.mini-cold-plate {
+  width: 22px;
+  height: 15px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, #f0f9ff, #38bdf8, #0369a1);
+}
+
+.mini-cooler span {
+  position: absolute;
+  width: 12px;
+  height: 2px;
+  border-radius: 99px;
+  background: #38bdf8;
+  left: 4px;
+}
+
+.mini-cooler span:nth-child(2) { top: 7px; }
+.mini-cooler span:nth-child(3) { bottom: 7px; right: 4px; left: auto; }
+
+.actuator-effect {
+  position: absolute;
+  inset: auto auto -34px 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+}
+
+.actuator-effect strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(47, 33, 8, .18);
+  white-space: nowrap;
+}
+
+.fan-effect strong {
+  color: #0f766e;
+  border: 1px solid rgba(15, 118, 110, .28);
+}
+
+.cooler-effect strong {
+  color: #0369a1;
+  border: 1px solid rgba(14, 165, 233, .28);
+}
+
+.fan-airflow,
+.cooler-airflow {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.fan-airflow span,
+.cooler-airflow span {
+  display: block;
+  width: 26px;
+  height: 5px;
+  border-radius: 99px;
+  opacity: .88;
+  animation: actuatorFlow 900ms ease-in-out infinite alternate;
+}
+
+.fan-airflow span {
+  background: linear-gradient(90deg, transparent, #14b8a6);
+}
+
+.cooler-airflow span {
+  background: linear-gradient(90deg, transparent, #38bdf8);
+}
+
+.fan-airflow span:nth-child(2),
+.cooler-airflow span:nth-child(2) {
+  animation-delay: 150ms;
+  width: 34px;
+}
+
+.fan-airflow span:nth-child(3),
+.cooler-airflow span:nth-child(3) {
+  animation-delay: 300ms;
+  width: 22px;
+}
+
+@keyframes actuatorFlow {
+  from { transform: translateX(-6px); opacity: .45; }
+  to { transform: translateX(8px); opacity: 1; }
+}
+
+.actuator-status-card {
+  background: #fffdf5;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.actuator-status-card.on {
+  border-color: #22c55e;
+  background: #f0fdf4;
+}
+
+.actuator-status-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.actuator-status-head strong {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.actuator-state-pill {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.actuator-status-card.on .actuator-state-pill {
+  background: #22c55e;
+  color: white;
+}
+
+.actuator-status-card small,
+.actuator-status-card p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* =========================================================
+   Scénarios critiques + actionneurs visuels améliorés
+   ========================================================= */
+.critical-scenario-box {
+  margin: 10px 0 8px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1.5px dashed rgba(239, 68, 68, .34);
+  background: linear-gradient(135deg, rgba(254, 242, 242, .95), rgba(255, 251, 235, .95));
+}
+
+.critical-scenario-box strong {
+  display: block;
+  color: #991b1b;
+  font-size: 11px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.critical-scenario-box p {
+  margin: 0 0 8px;
+  color: #7f1d1d;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.actuator-effect.led-effect {
+  inset: -25px auto auto 50%;
+}
+
+.led-halo {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  filter: blur(1px);
+  animation: ledHaloPulse 820ms ease-in-out infinite alternate;
+}
+
+.led-effect.red .led-halo {
+  background: radial-gradient(circle, rgba(239, 68, 68, .82), rgba(239, 68, 68, .16) 56%, transparent 70%);
+}
+
+.led-effect.green .led-halo {
+  background: radial-gradient(circle, rgba(34, 197, 94, .82), rgba(34, 197, 94, .16) 56%, transparent 70%);
+}
+
+.led-effect.red strong {
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, .35);
+}
+
+.led-effect.green strong {
+  color: #15803d;
+  border: 1px solid rgba(34, 197, 94, .35);
+}
+
+@keyframes ledHaloPulse {
+  from { transform: scale(.72); opacity: .48; }
+  to { transform: scale(1.1); opacity: 1; }
+}
+
+.fan-effect .fan-airflow span {
+  height: 6px;
+  box-shadow: 0 0 12px rgba(20, 184, 166, .35);
+}
+
+.cooler-effect .cooler-airflow span {
+  height: 6px;
+  box-shadow: 0 0 12px rgba(56, 189, 248, .45);
+}
+
+.actuator-status-card.on {
+  position: relative;
+  overflow: hidden;
+}
+
+.actuator-status-card.on::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(180deg, #22c55e, #14b8a6);
+}
+
+.actuator-status-card.on:nth-of-type(odd)::before {
+  background: linear-gradient(180deg, #0ea5e9, #38bdf8);
+}
+
+.actuator-status-card.on .actuator-status-head,
+.actuator-status-card.on p,
+.actuator-status-card.on small {
+  position: relative;
+}
+
+/* =========================================================
+   CORRECTION VISUELLE FAN / COOLER : CADRES AGRANDIS + PINS PROPRES
+   ========================================================= */
+.real-component-frame:has(.svg-fan),
+.real-component-frame:has(.svg-cooler) {
+  overflow: visible;
+}
+
+.real-component-frame:has(.svg-fan) .pin,
+.real-component-frame:has(.svg-cooler) .pin {
+  z-index: 130 !important;
+}
+
+.real-component-frame:has(.svg-fan) .component-male-header-layer,
+.real-component-frame:has(.svg-cooler) .component-male-header-layer {
+  z-index: 105;
+}
+
+.real-component-frame:has(.svg-fan) .component-male-pin,
+.real-component-frame:has(.svg-cooler) .component-male-pin {
+  width: 11px;
+  height: 14px;
+  transform: translate(-50%, -50%);
+}
+
+.real-component-frame:has(.svg-fan) .pin::after,
+.real-component-frame:has(.svg-cooler) .pin::after {
+  left: 14px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  white-space: nowrap;
+  z-index: 300 !important;
+}
+
+.real-component-frame:has(.svg-fan) .pin:hover::after,
+.real-component-frame:has(.svg-cooler) .pin:hover::after {
+  transform: translateY(-50%) !important;
+}
+
+.placed:has(.svg-fan) .delete-btn,
+.placed:has(.svg-fan) .rotate-handle,
+.placed:has(.svg-cooler) .delete-btn,
+.placed:has(.svg-cooler) .rotate-handle {
+  z-index: 260 !important;
+}
+
+.placed:has(.svg-fan) .component-info-card,
+.placed:has(.svg-cooler) .component-info-card {
+  z-index: 270 !important;
+  max-width: 285px;
+}
+
+.placed:has(.svg-fan) .actuator-effect,
+.placed:has(.svg-cooler) .actuator-effect {
+  right: 12px;
+  left: auto;
+  bottom: -34px;
+  transform: none;
+  align-items: flex-end;
+  z-index: 80;
+}
+
+.placed:has(.svg-fan) .component-power-leds,
+.placed:has(.svg-cooler) .component-power-leds {
+  right: 10px;
+  top: 8px;
+  z-index: 180;
+}
+
+.svg-fan,
+.svg-cooler {
+  filter:
+    drop-shadow(0 10px 18px rgba(15, 23, 42, 0.16))
+    drop-shadow(0 2px 2px rgba(15, 23, 42, 0.12));
+}
+
+.svg-fan text,
+.svg-cooler text {
+  pointer-events: none;
+  user-select: none;
+}

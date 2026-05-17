@@ -68,6 +68,8 @@ function getComponentPrefix(type, name) {
     soil: "SOIL",
     relay: "RELAY",
     buzzer: "BUZZER",
+    fan: "FAN",
+    cooler: "COOLER",
     led_r: "LED_RED",
     led_g: "LED_GREEN",
     wifi: "WIFI",
@@ -223,6 +225,10 @@ function generatePythonCode({ mappings, currentProjectId, currentProjectName, pr
   const mq2Gpio = getMappingGpio(mappings, "MQ2_DOUT", 27);
   const redLedGpio = getMappingGpio(mappings, "LED_RED_ANODE", 22);
   const greenLedGpio = getMappingGpio(mappings, "LED_GREEN_ANODE", 23);
+  const fanGpio = getMappingGpio(mappings, "FAN_IN", 18);
+  const coolerGpio = getMappingGpio(mappings, "COOLER_IN", 24);
+  const relayGpio = getMappingGpio(mappings, "RELAY_IN", 25);
+  const buzzerGpio = getMappingGpio(mappings, "BUZZER_PLUS", 26);
 
   return String.raw`#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
@@ -301,6 +307,10 @@ MQ135_DOUT_GPIO = int(os.getenv("MQ135_DOUT_GPIO", "${mq135Gpio}"))
 MQ2_DOUT_GPIO = int(os.getenv("MQ2_DOUT_GPIO", "${mq2Gpio}"))
 RED_LED_GPIO = int(os.getenv("RED_LED_GPIO", "${redLedGpio}"))
 GREEN_LED_GPIO = int(os.getenv("GREEN_LED_GPIO", "${greenLedGpio}"))
+FAN_GPIO = int(os.getenv("FAN_GPIO", "${fanGpio}"))
+COOLER_GPIO = int(os.getenv("COOLER_GPIO", "${coolerGpio}"))
+RELAY_GPIO = int(os.getenv("RELAY_GPIO", "${relayGpio}"))
+BUZZER_GPIO = int(os.getenv("BUZZER_GPIO", "${buzzerGpio}"))
 
 OLED_WIDTH = 128
 OLED_HEIGHT = 64
@@ -329,6 +339,16 @@ THRESHOLDS = {
         "critical_low": 950.0,
         "critical_high": 1060.0,
         "spike_delta": 3.0,
+    },
+    "mq135_ppm": {
+        "warning_high": 800.0,
+        "critical_high": 1200.0,
+        "spike_delta": 100.0,
+    },
+    "mq2_ppm": {
+        "warning_high": 150.0,
+        "critical_high": 300.0,
+        "spike_delta": 50.0,
     },
 }
 
@@ -440,6 +460,10 @@ class Hardware:
         self.green_led = None
         self.mq135 = None
         self.mq2 = None
+        self.fan = None
+        self.cooler = None
+        self.relay = None
+        self.buzzer = None
         self.dht = None
         self.i2c = None
         self.bmp280 = None
@@ -462,9 +486,13 @@ class Hardware:
 
             self.red_led = LED(RED_LED_GPIO)
             self.green_led = LED(GREEN_LED_GPIO)
+            self.fan = LED(FAN_GPIO)
+            self.cooler = LED(COOLER_GPIO)
+            self.relay = LED(RELAY_GPIO)
+            self.buzzer = LED(BUZZER_GPIO)
             self.mq135 = DigitalInputDevice(MQ135_DOUT_GPIO, pull_up=False)
             self.mq2 = DigitalInputDevice(MQ2_DOUT_GPIO, pull_up=False)
-            logging.info("GPIO OK : MQ-135, MQ-2, LED rouge, LED verte")
+            logging.info("GPIO OK : MQ-135, MQ-2, LEDs, ventilateur, refroidissement, relais, buzzer")
         except Exception as exc:
             self.notes.append(f"GPIO non initialisé: {exc}")
             logging.warning("GPIO non initialisé: %s", exc)
@@ -626,6 +654,82 @@ class Hardware:
             state["error"] = str(exc)
         return state
 
+    def set_actuators(self, status, sensors):
+        dht = sensors.get("dht22", {})
+        bmp = sensors.get("bmp280", {})
+        mq135 = sensors.get("mq135", {})
+        mq2 = sensors.get("mq2", {})
+        temp = to_float(dht.get("temperature_c"))
+        if temp is None:
+            temp = to_float(bmp.get("temperature_c"))
+
+        mq135_ppm = to_float(mq135.get("co2_ppm") or mq135.get("ppm_estimate") or mq135.get("analog_value"))
+        mq2_ppm = to_float(mq2.get("smoke_ppm") or mq2.get("ppm_estimate") or mq2.get("analog_value"))
+
+        temperature_warning = temp is not None and temp >= THRESHOLDS["temperature_c"]["warning_high"]
+        temperature_critical = temp is not None and temp >= THRESHOLDS["temperature_c"]["critical_high"]
+        gas_warning = (
+            mq135.get("gas_detected") is True
+            or mq2.get("gas_detected") is True
+            or (mq135_ppm is not None and mq135_ppm >= THRESHOLDS["mq135_ppm"]["warning_high"])
+            or (mq2_ppm is not None and mq2_ppm >= THRESHOLDS["mq2_ppm"]["warning_high"])
+        )
+        gas_critical = (
+            (mq135_ppm is not None and mq135_ppm >= THRESHOLDS["mq135_ppm"]["critical_high"])
+            or (mq2_ppm is not None and mq2_ppm >= THRESHOLDS["mq2_ppm"]["critical_high"])
+        )
+
+        # Logique demandée :
+        # - pic de température => refroidissement
+        # - gaz/fumée => ventilateur d'extraction
+        fan_on = gas_warning
+        cooler_on = temperature_warning
+        relay_on = status == "critical"
+        buzzer_on = status == "critical"
+
+        def apply(device, active):
+            if not device:
+                return
+            if active:
+                device.on()
+            else:
+                device.off()
+
+        state = {
+            "fan_gpio": FAN_GPIO,
+            "cooler_gpio": COOLER_GPIO,
+            "relay_gpio": RELAY_GPIO,
+            "buzzer_gpio": BUZZER_GPIO,
+            "fan": "on" if fan_on else "off",
+            "fan_label": "EXTRACTION MAX" if gas_critical else "EXTRACTION AIR" if fan_on else "OFF",
+            "fan_reason": "Gaz/fumée détecté : ventilation activée." if fan_on else "Aucun gaz/fumée détecté.",
+            "fan_intensity": 100 if gas_critical else 70 if fan_on else 0,
+            "cooler": "on" if cooler_on else "off",
+            "cooler_label": "FROID MAX" if temperature_critical else "REFROIDIR" if cooler_on else "OFF",
+            "cooler_reason": "Pic de température : refroidissement activé." if cooler_on else "Température normale.",
+            "cooler_intensity": 100 if temperature_critical else 65 if cooler_on else 0,
+            "relay": "on" if relay_on else "off",
+            "buzzer": "on" if buzzer_on else "off",
+            "triggers": {
+                "temperature_c": temp,
+                "mq135_ppm": mq135_ppm,
+                "mq2_ppm": mq2_ppm,
+                "temperature_warning": temperature_warning,
+                "temperature_critical": temperature_critical,
+                "gas_warning": gas_warning,
+                "gas_critical": gas_critical,
+            },
+            "reason": "Réaction automatique selon seuils capteurs",
+        }
+        try:
+            apply(self.fan, fan_on)
+            apply(self.cooler, cooler_on)
+            apply(self.relay, relay_on)
+            apply(self.buzzer, buzzer_on)
+        except Exception as exc:
+            state["error"] = str(exc)
+        return state
+
     def show_oled(self, payload):
         if not self.oled or self.oled_draw is None or self.oled_image is None:
             return
@@ -660,6 +764,10 @@ class Hardware:
             if self.green_led:
                 self.green_led.off()
                 self.green_led.close()
+            for device in [self.fan, self.cooler, self.relay, self.buzzer]:
+                if device:
+                    device.off()
+                    device.close()
             if self.mq135:
                 self.mq135.close()
             if self.mq2:
@@ -673,22 +781,50 @@ class Hardware:
             pass
 
 
+def simulation_profile():
+    """Produit parfois des valeurs critiques pour tester LEDs, ventilateur et refroidissement."""
+    roll = random.random()
+    if roll < 0.16:
+        return "critical"
+    if roll < 0.42:
+        return "warning"
+    return "normal"
+
+
 def simulate_sensors(mode):
-    mq135_alert = random.random() < 0.10
-    mq2_alert = random.random() < 0.08
-    temp = round(random.uniform(24, 36), 2)
-    humidity = round(random.uniform(45, 82), 2)
-    pressure = round(random.uniform(990, 1028), 2)
+    profile = simulation_profile()
+
+    if profile == "critical":
+        temp = round(random.uniform(40.5, 55.0), 2)
+        humidity = round(random.choice([random.uniform(90, 98), random.uniform(8, 14)]), 2)
+        pressure = round(random.choice([random.uniform(1061, 1095), random.uniform(900, 949)]), 2)
+        co2_ppm = round(random.uniform(1220, 2400), 0)
+        smoke_ppm = round(random.uniform(310, 900), 0)
+    elif profile == "warning":
+        temp = round(random.uniform(32.5, 38.5), 2)
+        humidity = round(random.choice([random.uniform(76, 84), random.uniform(18, 24)]), 2)
+        pressure = round(random.choice([random.uniform(1036, 1055), random.uniform(965, 979)]), 2)
+        co2_ppm = round(random.uniform(820, 1150), 0)
+        smoke_ppm = round(random.uniform(155, 285), 0)
+    else:
+        temp = round(random.uniform(24, 31), 2)
+        humidity = round(random.uniform(45, 72), 2)
+        pressure = round(random.uniform(990, 1028), 2)
+        co2_ppm = round(random.uniform(380, 760), 0)
+        smoke_ppm = round(random.uniform(10, 130), 0)
+
+    mq135_alert = co2_ppm >= THRESHOLDS["mq135_ppm"]["warning_high"]
+    mq2_alert = smoke_ppm >= THRESHOLDS["mq2_ppm"]["warning_high"]
 
     return {
         "mode": mode,
-        "dht22": {"available": True, "temperature_c": temp, "humidity_percent": humidity, "error": None},
-        "bmp280": {"available": True, "i2c_address": "simulated", "temperature_c": temp, "pressure_hpa": pressure, "altitude_m": round(random.uniform(1100, 1300), 2), "error": None},
-        "mq135": {"available": True, "digital_raw": MQ_ACTIVE_LEVEL if mq135_alert else 1 - MQ_ACTIVE_LEVEL, "gas_detected": mq135_alert, "active_level": MQ_ACTIVE_LEVEL, "analog_value": None, "analog_note": "simulation", "error": None},
-        "mq2": {"available": True, "digital_raw": MQ_ACTIVE_LEVEL if mq2_alert else 1 - MQ_ACTIVE_LEVEL, "gas_detected": mq2_alert, "active_level": MQ_ACTIVE_LEVEL, "analog_value": None, "analog_note": "simulation", "error": None},
-        "hardware_notes": ["Mode simulation ou fallback."],
+        "simulation_profile": profile,
+        "dht22": {"available": True, "temperature_c": temp, "humidity_percent": humidity, "level": profile, "error": None},
+        "bmp280": {"available": True, "i2c_address": "simulated", "temperature_c": temp, "pressure_hpa": pressure, "altitude_m": round(random.uniform(1100, 1300), 2), "level": profile, "error": None},
+        "mq135": {"available": True, "digital_raw": MQ_ACTIVE_LEVEL if mq135_alert else 1 - MQ_ACTIVE_LEVEL, "gas_detected": mq135_alert, "active_level": MQ_ACTIVE_LEVEL, "co2_ppm": co2_ppm, "ppm_estimate": co2_ppm, "analog_value": None, "analog_note": "simulation", "level": "critical" if co2_ppm >= 1200 else "warning" if mq135_alert else "normal", "error": None},
+        "mq2": {"available": True, "digital_raw": MQ_ACTIVE_LEVEL if mq2_alert else 1 - MQ_ACTIVE_LEVEL, "gas_detected": mq2_alert, "active_level": MQ_ACTIVE_LEVEL, "smoke_ppm": smoke_ppm, "ppm_estimate": smoke_ppm, "analog_value": None, "analog_note": "simulation", "level": "critical" if smoke_ppm >= 300 else "warning" if mq2_alert else "normal", "error": None},
+        "hardware_notes": ["Mode simulation ou fallback avec scénarios normal/warning/critical."],
     }
-
 
 def add_alert(alerts, level, sensor, field, value, message):
     alerts.append({"level": level, "sensor": sensor, "field": field, "value": value, "message": message})
@@ -735,14 +871,22 @@ def evaluate(sensors, previous):
     check_threshold(alerts, "DHT22", "humidity_percent", dht.get("humidity_percent"), THRESHOLDS["humidity_percent"])
     check_threshold(alerts, "BMP280", "pressure_hpa", bmp.get("pressure_hpa"), THRESHOLDS["pressure_hpa"])
 
-    if mq135.get("gas_detected") is True:
-        add_alert(alerts, "critical", "MQ-135", "DOUT", mq135.get("digital_raw"), "Gaz/pollution détecté par MQ-135")
-    if mq2.get("gas_detected") is True:
-        add_alert(alerts, "critical", "MQ-2", "DOUT", mq2.get("digital_raw"), "Fumée/gaz inflammable détecté par MQ-2")
+    mq135_ppm = mq135.get("co2_ppm") or mq135.get("ppm_estimate") or mq135.get("analog_value")
+    mq2_ppm = mq2.get("smoke_ppm") or mq2.get("ppm_estimate") or mq2.get("analog_value")
+
+    check_threshold(alerts, "MQ-135", "mq135_ppm", mq135_ppm, THRESHOLDS["mq135_ppm"])
+    check_threshold(alerts, "MQ-2", "mq2_ppm", mq2_ppm, THRESHOLDS["mq2_ppm"])
+
+    if mq135.get("gas_detected") is True and to_float(mq135_ppm) is None:
+        add_alert(alerts, "warning", "MQ-135", "DOUT", mq135.get("digital_raw"), "Gaz/pollution détecté par MQ-135")
+    if mq2.get("gas_detected") is True and to_float(mq2_ppm) is None:
+        add_alert(alerts, "warning", "MQ-2", "DOUT", mq2.get("digital_raw"), "Fumée/gaz inflammable détecté par MQ-2")
 
     check_spike(alerts, previous, "dht.temperature", "DHT22", "temperature_c", dht.get("temperature_c"), THRESHOLDS["temperature_c"]["spike_delta"])
     check_spike(alerts, previous, "dht.humidity", "DHT22", "humidity_percent", dht.get("humidity_percent"), THRESHOLDS["humidity_percent"]["spike_delta"])
     check_spike(alerts, previous, "bmp.pressure", "BMP280", "pressure_hpa", bmp.get("pressure_hpa"), THRESHOLDS["pressure_hpa"]["spike_delta"])
+    check_spike(alerts, previous, "mq135.ppm", "MQ-135", "mq135_ppm", mq135_ppm, THRESHOLDS["mq135_ppm"]["spike_delta"])
+    check_spike(alerts, previous, "mq2.ppm", "MQ-2", "mq2_ppm", mq2_ppm, THRESHOLDS["mq2_ppm"]["spike_delta"])
 
     has_critical = any(a["level"] == "critical" for a in alerts)
     has_warning = any(a["level"] == "warning" for a in alerts)
@@ -760,7 +904,7 @@ def evaluate(sensors, previous):
     return {"global_status": status, "alerts_count": len(alerts), "alerts": alerts, "recommendation": recommendation, "thresholds": THRESHOLDS}
 
 
-def build_payload(sensors, analysis, leds):
+def build_payload(sensors, analysis, leds, actuators):
     return {
         "source": "Raspberry Pi 5",
         "project_id": PROJECT_ID,
@@ -771,6 +915,7 @@ def build_payload(sensors, analysis, leds):
         "sensors": sensors,
         "analysis": analysis,
         "leds": leds,
+        "actuators": actuators,
         "config": {
             "read_interval_seconds": READ_INTERVAL_SECONDS,
             "mq_active_level": MQ_ACTIVE_LEVEL,
@@ -805,7 +950,7 @@ def log_resume(payload):
     pressure = bmp.get("pressure_hpa")
 
     logging.info(
-        "Projet=%s | Etat=%s | T=%s°C | H=%s%% | P=%shPa | MQ135=%s | MQ2=%s | LED_R=%s | LED_V=%s",
+        "Projet=%s | Etat=%s | T=%s°C | H=%s%% | P=%shPa | MQ135=%s | MQ2=%s | FAN=%s | COOL=%s | LED_R=%s | LED_V=%s",
         PROJECT_ID,
         analysis["global_status"],
         fmt(temp),
@@ -813,6 +958,8 @@ def log_resume(payload):
         fmt(pressure),
         yes_no(mq135.get("gas_detected")),
         yes_no(mq2.get("gas_detected")),
+        payload["actuators"].get("fan"),
+        payload["actuators"].get("cooler"),
         payload["leds"].get("red"),
         payload["leds"].get("green"),
     )
@@ -831,7 +978,8 @@ def main():
             sensors = hardware.read_all()
             analysis = evaluate(sensors, previous_values)
             leds = hardware.set_leds(analysis["global_status"])
-            payload = build_payload(sensors, analysis, leds)
+            actuators = hardware.set_actuators(analysis["global_status"], sensors)
+            payload = build_payload(sensors, analysis, leds, actuators)
 
             hardware.show_oled(payload)
             log_resume(payload)
@@ -1009,6 +1157,8 @@ export default function PiConfigModal({
               <li>OLED SDA → GPIO2 SDA, SCL → GPIO3 SCL</li>
               <li>LED rouge anode → GPIO22, cathode → GND</li>
               <li>LED verte anode → GPIO23, cathode → GND</li>
+              <li>Ventilateur IN/PWM → GPIO18, VCC 5V et GND via relais/transistor si moteur réel</li>
+              <li>Refroidissement IN → GPIO24, alimentation externe recommandée pour module Peltier</li>
               <li>AOUT analogique → ADC externe comme MCP3008 ou ADS1115</li>
             </ul>
           </div>
