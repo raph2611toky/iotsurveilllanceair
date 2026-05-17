@@ -21,10 +21,12 @@ const DEFAULT_SENSOR_CONFIGS = {
   soil: { humidity: 55, variation: 12 },
 };
 
-const DEFAULT_PROJECT_API_HOST = "127.0.0.1";
-const DEFAULT_PROJECT_API_PORT = "5000";
+const DEFAULT_PROJECT_API_HOST = import.meta.env.VITE_API_HOST || "127.0.0.1";
+const DEFAULT_PROJECT_API_PORT = import.meta.env.VITE_API_PORT || "5000";
+const ENV_ACTIVE_PROJECT_ID = import.meta.env.VITE_ACTIVE_PROJECT_ID || import.meta.env.VITE_PROJECT_ID || "";
 const STORAGE_CURRENT_PROJECT_ID = "iot-editor-current-project-id";
 const STORAGE_CURRENT_PROJECT_NAME = "iot-editor-current-project-name";
+const STORAGE_RPI_CODE = "iot-editor-rpi-code";
 
 function randAround(base, variation, dec = 1) {
   const min = Number(base) - Number(variation);
@@ -176,6 +178,19 @@ function safeProjectName(name) {
     .toLowerCase();
 }
 
+function buildProjectApiBaseUrl(host, portValue) {
+  const cleanHost = String(host || DEFAULT_PROJECT_API_HOST).trim().replace(/\/$/, "");
+  const hasProtocol = /^https?:\/\//i.test(cleanHost);
+  const baseHost = hasProtocol ? cleanHost : `http://${cleanHost}`;
+  const cleanPort = String(portValue || "").trim();
+
+  if (!cleanPort) {
+    return `${baseHost}/api`;
+  }
+
+  return `${baseHost}:${cleanPort}/api`;
+}
+
 export default function App() {
   const hasLoadedProject = useRef(false);
 
@@ -201,6 +216,7 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [currentProjectId, setCurrentProjectId] = useState(null);
   const [currentProjectName, setCurrentProjectName] = useState("");
+  const [raspberryPiCode, setRaspberryPiCode] = useState(() => localStorage.getItem(STORAGE_RPI_CODE) || "");
   const [projectApiReady, setProjectApiReady] = useState(false);
   const [isLoadingProject, setIsLoadingProject] = useState(false);
 
@@ -212,7 +228,7 @@ export default function App() {
     return items.find((item) => item.id === piConfigItemId) || null;
   }, [items, piConfigItemId]);
 
-  const projectApiBaseUrl = `http://${projectApiHost}:${port}/api`;
+  const projectApiBaseUrl = buildProjectApiBaseUrl(projectApiHost, port);
   const simulationEndpoint = currentProjectId
     ? `${projectApiBaseUrl}/projects/${currentProjectId}/simulation-data`
     : `${projectApiBaseUrl}/projects/<id>/simulation-data`;
@@ -226,11 +242,23 @@ export default function App() {
       await axios.get(`${projectApiBaseUrl}/health`);
       setProjectApiReady(true);
 
-      const projectsResponse = await axios.get(`${projectApiBaseUrl}/projects`);
+      const [projectsResponse, editorEnvResponse] = await Promise.all([
+        axios.get(`${projectApiBaseUrl}/projects`),
+        axios.get(`${projectApiBaseUrl}/editor-env`).catch(() => ({ data: {} })),
+      ]);
+
       setProjects(projectsResponse.data || []);
 
-      const savedProjectId = localStorage.getItem(STORAGE_CURRENT_PROJECT_ID);
-      const savedProjectName = localStorage.getItem(STORAGE_CURRENT_PROJECT_NAME) || "";
+      const savedProjectId =
+        localStorage.getItem(STORAGE_CURRENT_PROJECT_ID) ||
+        editorEnvResponse.data?.activeProjectId ||
+        ENV_ACTIVE_PROJECT_ID ||
+        "";
+
+      const savedProjectName =
+        localStorage.getItem(STORAGE_CURRENT_PROJECT_NAME) ||
+        editorEnvResponse.data?.activeProjectName ||
+        "";
 
       if (savedProjectId) {
         await loadProjectById(Number(savedProjectId), false);
@@ -256,6 +284,22 @@ export default function App() {
     }
   }
 
+  async function persistActiveProject(projectId, projectName) {
+    if (!projectId) return;
+
+    localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, String(projectId));
+    localStorage.setItem(STORAGE_CURRENT_PROJECT_NAME, projectName || "");
+
+    try {
+      await axios.post(`${projectApiBaseUrl}/editor-env`, {
+        activeProjectId: Number(projectId),
+        activeProjectName: projectName || "",
+      });
+    } catch {
+      // localStorage reste la source de secours si le backend est arrêté.
+    }
+  }
+
   function applyProjectData(project) {
     const data = project.data || {};
 
@@ -271,9 +315,9 @@ export default function App() {
     setSelectedId(data.selectedId || null);
     setLeftCollapsed(Boolean(data.leftCollapsed));
     setRightCollapsed(Boolean(data.rightCollapsed));
+    setRaspberryPiCode(data.raspberryPiCode || localStorage.getItem(STORAGE_RPI_CODE) || "");
 
-    localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, String(project.id));
-    localStorage.setItem(STORAGE_CURRENT_PROJECT_NAME, project.name || data.name || "");
+    persistActiveProject(project.id, project.name || data.name || "");
   }
 
   async function loadProjectById(projectId, showLog = true) {
@@ -284,6 +328,16 @@ export default function App() {
     try {
       const response = await axios.get(`${projectApiBaseUrl}/projects/${projectId}`);
       applyProjectData(response.data);
+
+      try {
+        const codeResponse = await axios.get(`${projectApiBaseUrl}/projects/${projectId}/raspberry-code`);
+        if (codeResponse.data?.code) {
+          setRaspberryPiCode(codeResponse.data.code);
+          localStorage.setItem(STORAGE_RPI_CODE, codeResponse.data.code);
+        }
+      } catch {
+        // Le code peut ne pas encore exister pour ce projet.
+      }
 
       if (showLog) {
         setLogs((previous) => [
@@ -402,6 +456,7 @@ export default function App() {
       selectedId,
       leftCollapsed,
       rightCollapsed,
+      raspberryPiCode,
     };
   }
 
@@ -447,8 +502,7 @@ export default function App() {
       projectId = response.data.id;
       setCurrentProjectId(projectId);
       setCurrentProjectName(response.data.name);
-      localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, String(projectId));
-      localStorage.setItem(STORAGE_CURRENT_PROJECT_NAME, response.data.name);
+      await persistActiveProject(projectId, response.data.name);
       await refreshProjectList();
     } else {
       await axios.put(`${projectApiBaseUrl}/projects/${projectId}`, {
@@ -503,11 +557,13 @@ export default function App() {
       wires: [],
       sensorConfigs: {},
       zoom: 100,
+      projectApiHost,
       port,
       apiEnabled: false,
       selectedId: null,
       leftCollapsed: false,
       rightCollapsed: false,
+      raspberryPiCode: "",
     };
 
     try {
@@ -528,8 +584,7 @@ export default function App() {
       setLeftCollapsed(false);
       setRightCollapsed(false);
 
-      localStorage.setItem(STORAGE_CURRENT_PROJECT_ID, String(response.data.id));
-      localStorage.setItem(STORAGE_CURRENT_PROJECT_NAME, response.data.name);
+      await persistActiveProject(response.data.id, response.data.name);
 
       await refreshProjectList();
 
@@ -674,20 +729,67 @@ export default function App() {
     ]);
   }
 
-  function handleApplyPiConfig() {
-    setLogs((previous) => [
-      {
-        id: Date.now(),
-        status: "success",
-        method: "UPLOAD",
-        url: "Raspberry Pi 5 virtuel",
-        time: new Date().toLocaleTimeString(),
-        message: "Configuration téléversée virtuellement dans le Raspberry Pi 5.",
-      },
-      ...previous,
-    ]);
+  async function handleApplyPiConfig(code, validation = null) {
+    let projectId = currentProjectId || Number(localStorage.getItem(STORAGE_CURRENT_PROJECT_ID));
 
-    setPiConfigItemId(null);
+    if (!projectId) {
+      await saveProject(false);
+      projectId = Number(localStorage.getItem(STORAGE_CURRENT_PROJECT_ID));
+    }
+
+    if (!projectId) {
+      setLogs((previous) => [
+        {
+          id: Date.now(),
+          status: "error",
+          method: "UPLOAD",
+          url: "Raspberry Pi 5 virtuel",
+          time: new Date().toLocaleTimeString(),
+          message: "Impossible d'appliquer le code : aucun projet actif n'est disponible.",
+        },
+        ...previous,
+      ]);
+      return;
+    }
+
+    try {
+      const response = await axios.post(`${projectApiBaseUrl}/projects/${projectId}/raspberry-code`, {
+        itemId: piConfigItemId,
+        code,
+      });
+
+      setRaspberryPiCode(code);
+      localStorage.setItem(STORAGE_RPI_CODE, code);
+      await persistActiveProject(projectId, currentProjectName);
+
+      setLogs((previous) => [
+        {
+          id: Date.now(),
+          status: response.data?.validation?.ok ? "success" : "blocked",
+          method: "UPLOAD",
+          url: `Projet ${projectId}`,
+          time: new Date().toLocaleTimeString(),
+          message: response.data?.validation?.ok
+            ? "Code Raspberry Pi sauvegardé et interprété : syntaxe/imports OK."
+            : validation?.installCommand || response.data?.validation?.installCommand || "Code sauvegardé, mais certains modules doivent être installés.",
+        },
+        ...previous,
+      ]);
+
+      setPiConfigItemId(null);
+    } catch (error) {
+      setLogs((previous) => [
+        {
+          id: Date.now(),
+          status: "error",
+          method: "UPLOAD",
+          url: `Projet ${projectId}`,
+          time: new Date().toLocaleTimeString(),
+          message: error?.response?.data?.error || "Impossible de sauvegarder le code Raspberry Pi.",
+        },
+        ...previous,
+      ]);
+    }
   }
 
   if (piConfigItem) {
@@ -698,6 +800,10 @@ export default function App() {
         wires={wires}
         sensorConfigs={sensorConfigs}
         sensorDataByItem={sensorDataByItem}
+        currentProjectId={currentProjectId}
+        currentProjectName={currentProjectName}
+        projectApiBaseUrl={projectApiBaseUrl}
+        savedCode={raspberryPiCode}
         onClose={() => setPiConfigItemId(null)}
         onApply={handleApplyPiConfig}
       />

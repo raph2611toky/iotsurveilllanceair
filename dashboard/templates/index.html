@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <title>Dashboard ENI · Surveillance qualité de l'air</title>
+  <link rel="stylesheet" href="/dashboard.css?v=flask-template-direct2" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark brand-logo"><img src="/images/eni.png" alt="ENI" /></div>
+        <div>
+          <strong>ENI Air Monitor</strong>
+          <span>IoT Dashboard</span>
+        </div>
+      </div>
+
+      <nav class="side-nav">
+        <a class="active" href="#overview">Vue globale</a>
+        <a href="#sensors">Capteurs</a>
+        <a href="#charts">Graphiques</a>
+        <a href="#alerts">Notifications</a>
+      </nav>
+
+      <div class="project-box">
+        <span>Projet actif</span>
+        <select id="projectSelect" aria-label="Choisir un projet">
+          {% if projects %}
+            {% for project in projects %}
+              <option value="{{ project.id }}" {% if project.id == active_project_id %}selected{% endif %}>#{{ project.id }} · {{ project.name }}</option>
+            {% endfor %}
+          {% else %}
+            <option value="">Aucun projet</option>
+          {% endif %}
+        </select>
+      </div>
+
+      <div class="connection-box" id="connectionBox">
+        <span class="pulse"></span>
+        <div>
+          <strong id="connectionState">Rendu Flask</strong>
+          <small id="lastUpdate">{{ dashboard_data.display.lastUpdate }}</small>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Surveillance intelligente</p>
+          <h1>Qualité de l’air en temps réel</h1>
+          <p class="subtitle">DHT22, BMP280, MQ-135, MQ-2, OLED, LEDs et notifications de pics.</p>
+        </div>
+        <div class="top-actions">
+          <button id="enableNotifications" class="ghost-btn" type="button">Activer notifications</button>
+          <button id="refreshNow" class="primary-btn" type="button">Actualiser</button>
+        </div>
+      </header>
+
+      <section id="overview" class="hero-panel">
+        <div class="status-card" id="globalStatusCard">
+          <div class="status-orb" id="statusOrb"></div>
+          <div>
+            <p>État global</p>
+            <h2 id="globalStatus">{{ dashboard_data.display.globalStatus }}</h2>
+            <span id="recommendation">{{ dashboard_data.display.recommendation }}</span>
+          </div>
+        </div>
+        <div class="hero-metrics">
+          <div><span id="eventCount">{{ dashboard_data.display.eventCount }}</span><small>mesures reçues</small></div>
+          <div><span id="alertCount">{{ dashboard_data.display.alertCount }}</span><small>alertes actives</small></div>
+          <div><span id="apiSource">{{ dashboard_data.display.source }}</span><small>source</small></div>
+        </div>
+      </section>
+
+      <section id="sensors" class="sensor-grid">
+        <article class="sensor-card" data-sensor="dht22">
+          <div class="sensor-icon temp-icon" aria-hidden="true">
+            <svg viewBox="0 0 80 80"><path d="M39 12a9 9 0 0 0-9 9v24a20 20 0 1 0 18 0V21a9 9 0 0 0-9-9Zm0 8a1 1 0 0 1 1 1v29l2 1a12 12 0 1 1-12 0l2-1V21a1 1 0 0 1 1-1Z"/><path d="M36 37h6v21h-6z"/></svg>
+          </div>
+          <div class="sensor-content">
+            <span>DHT22</span>
+            <h3><b id="temperatureValue">{{ dashboard_data.display.temperature }}</b> °C</h3>
+            <p>Température</p>
+          </div>
+        </article>
+
+        <article class="sensor-card" data-sensor="humidity">
+          <div class="sensor-icon humidity-icon" aria-hidden="true">
+            <svg viewBox="0 0 80 80"><path d="M40 8S19 32 19 48a21 21 0 0 0 42 0C61 32 40 8 40 8Zm0 51a11 11 0 0 1-11-11h7a4 4 0 0 0 4 4v7Z"/></svg>
+          </div>
+          <div class="sensor-content">
+            <span>DHT22</span>
+            <h3><b id="humidityValue">{{ dashboard_data.display.humidity }}</b> %</h3>
+            <p>Humidité</p>
+          </div>
+        </article>
+
+        <article class="sensor-card" data-sensor="bmp280">
+          <div class="sensor-icon pressure-icon" aria-hidden="true">
+            <svg viewBox="0 0 80 80"><path d="M40 13a27 27 0 0 0-27 27c0 10 5.5 18.8 13.6 23.5l4.1-7.1A19 19 0 1 1 59 40h8A27 27 0 0 0 40 13Z"/><path d="m42 42 15-17-21 11a7 7 0 1 0 6 6Z"/></svg>
+          </div>
+          <div class="sensor-content">
+            <span>BMP280</span>
+            <h3><b id="pressureValue">{{ dashboard_data.display.pressure }}</b> hPa</h3>
+            <p>Pression atmosphérique</p>
+          </div>
+        </article>
+
+        <article class="sensor-card" data-sensor="mq135">
+          <div class="sensor-icon air-icon" aria-hidden="true">
+            <svg viewBox="0 0 80 80"><path d="M14 26c0-8 6.4-14 14.5-14 5.7 0 10.7 3.3 13 8.1A13.8 13.8 0 0 1 64 31c0 8.1-6.3 14-14.2 14H18a8 8 0 0 1-1.2-16A14.3 14.3 0 0 1 14 26Z"/><path d="M18 55h44v7H18zM26 67h28v6H26z"/></svg>
+          </div>
+          <div class="sensor-content">
+            <span>MQ-135</span>
+            <h3 id="mq135Value">{{ dashboard_data.display.mq135 }}</h3>
+            <p>Pollution / gaz</p>
+          </div>
+        </article>
+
+        <article class="sensor-card" data-sensor="mq2">
+          <div class="sensor-icon smoke-icon" aria-hidden="true">
+            <svg viewBox="0 0 80 80"><path d="M39 7c6 11-3 15-3 22 0 4 3 8 8 8 8 0 11-8 8-17 11 8 15 17 15 27 0 15-12 26-27 26S13 62 13 47c0-13 8-21 16-28-1 8 2 13 7 14 5-8-2-14 3-26Z"/></svg>
+          </div>
+          <div class="sensor-content">
+            <span>MQ-2</span>
+            <h3 id="mq2Value">{{ dashboard_data.display.mq2 }}</h3>
+            <p>Fumée / gaz inflammable</p>
+          </div>
+        </article>
+
+        <article class="sensor-card" data-sensor="leds">
+          <div class="sensor-icon led-icon" aria-hidden="true">
+            <svg viewBox="0 0 80 80"><path d="M25 12h30v26a15 15 0 1 1-30 0V12Zm-3 48h36v8H22v-8Zm9 11h18v5H31v-5Z"/></svg>
+          </div>
+          <div class="sensor-content">
+            <span>LEDs</span>
+            <h3 id="ledState">{{ dashboard_data.display.leds }}</h3>
+            <p>Rouge critique · Verte pré-alerte</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="charts" class="chart-layout">
+        <article class="chart-card wide">
+          <div class="card-title">
+            <div>
+              <span>Évolution</span>
+              <h3>Température & humidité</h3>
+            </div>
+            <small>Courbes temps réel</small>
+          </div>
+          <canvas id="temperatureHumidityChart" height="260"></canvas>
+        </article>
+
+        <article class="chart-card">
+          <div class="card-title">
+            <div>
+              <span>BMP280</span>
+              <h3>Pression</h3>
+            </div>
+            <small>hPa</small>
+          </div>
+          <canvas id="pressureChart" height="260"></canvas>
+        </article>
+
+        <article class="chart-card">
+          <div class="card-title">
+            <div>
+              <span>Gaz</span>
+              <h3>MQ-135 / MQ-2</h3>
+            </div>
+            <small>ppm simulé / temps réel</small>
+          </div>
+          <canvas id="gasChart" height="260"></canvas>
+        </article>
+
+        <article class="chart-card">
+          <div class="card-title">
+            <div>
+              <span>État</span>
+              <h3>Répartition</h3>
+            </div>
+            <small>Normal / warning / critique</small>
+          </div>
+          <canvas id="statusChart" height="260"></canvas>
+        </article>
+      </section>
+
+      <section id="alerts" class="alerts-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Pics & seuils</p>
+            <h2>Notifications en temps réel</h2>
+          </div>
+          <span id="alertBadge" class="alert-badge">{{ dashboard_data.display.alertBadge }}</span>
+        </div>
+        <div id="alertList" class="alert-list empty">Aucune alerte pour le moment.</div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toastStack" class="toast-stack"></div>
+
+  <script>
+    const INITIAL_DASHBOARD_DATA = {{ dashboard_data|tojson }};
+    const ACTIVE_PROJECT_ID = {{ active_project_id|tojson }};
+
+    const state = {
+      selectedProjectId: ACTIVE_PROJECT_ID ? String(ACTIVE_PROJECT_ID) : null,
+      lastEventId: null,
+      browserNotifications: false,
+      previousLatest: null,
+      lastData: null,
+      stream: null,
+      reconnectTimer: null,
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    const els = {
+      projectSelect: $("projectSelect"),
+      connectionState: $("connectionState"),
+      lastUpdate: $("lastUpdate"),
+      connectionBox: $("connectionBox"),
+      globalStatus: $("globalStatus"),
+      globalStatusCard: $("globalStatusCard"),
+      statusOrb: $("statusOrb"),
+      recommendation: $("recommendation"),
+      eventCount: $("eventCount"),
+      alertCount: $("alertCount"),
+      apiSource: $("apiSource"),
+      temperatureValue: $("temperatureValue"),
+      humidityValue: $("humidityValue"),
+      pressureValue: $("pressureValue"),
+      mq135Value: $("mq135Value"),
+      mq2Value: $("mq2Value"),
+      ledState: $("ledState"),
+      alertList: $("alertList"),
+      alertBadge: $("alertBadge"),
+      toastStack: $("toastStack"),
+    };
+
+    function formatNumber(value, decimals = 1) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
+      return Number(value).toFixed(decimals);
+    }
+
+    function labelTime(value) {
+      try {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "--:--";
+        return date.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      } catch (error) {
+        return "--:--";
+      }
+    }
+
+    function statusLabel(status) {
+      if (status === "critical") return "Critique";
+      if (status === "warning") return "Pré-alerte";
+      return "Normal";
+    }
+
+    function setConnection(ok, message = "Connecté") {
+      els.connectionBox.classList.toggle("offline", !ok);
+      els.connectionState.textContent = ok ? message : "Déconnecté";
+    }
+
+    function drawLineChart(canvas, series, options = {}) {
+      const ctx = canvas.getContext("2d");
+      const width = canvas.clientWidth || canvas.width;
+      const height = canvas.clientHeight || canvas.height;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(width * ratio);
+      canvas.height = Math.floor(height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const padding = { left: 44, right: 18, top: 18, bottom: 34 };
+      const plotW = width - padding.left - padding.right;
+      const plotH = height - padding.top - padding.bottom;
+      const allValues = series.flatMap(s => s.values).filter(v => typeof v === "number" && !Number.isNaN(v));
+
+      ctx.font = "12px Inter, Arial, sans-serif";
+      ctx.fillStyle = "#94a3b8";
+
+      if (allValues.length === 0) {
+        ctx.fillText("En attente des données...", padding.left, height / 2);
+        return;
+      }
+
+      let min = options.min ?? Math.min(...allValues);
+      let max = options.max ?? Math.max(...allValues);
+      if (min === max) { min -= 1; max += 1; }
+      const gap = (max - min) * 0.12;
+      min -= gap;
+      max += gap;
+
+      ctx.strokeStyle = "#e2e8f0";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = padding.top + (plotH / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(width - padding.right, y);
+        ctx.stroke();
+        const value = max - ((max - min) / 4) * i;
+        ctx.fillText(value.toFixed(1), 6, y + 4);
+      }
+
+      const count = Math.max(...series.map(s => s.values.length), 2);
+      const xFor = (index) => padding.left + (plotW * index) / Math.max(count - 1, 1);
+      const yFor = (value) => padding.top + plotH - ((value - min) / (max - min)) * plotH;
+
+      series.forEach((s) => {
+        ctx.strokeStyle = s.color;
+        ctx.lineWidth = 2.8;
+        ctx.beginPath();
+        let started = false;
+        s.values.forEach((value, index) => {
+          if (typeof value !== "number" || Number.isNaN(value)) return;
+          const x = xFor(index);
+          const y = yFor(value);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+
+        s.values.forEach((value, index) => {
+          if (typeof value !== "number" || Number.isNaN(value)) return;
+          const x = xFor(index);
+          const y = yFor(value);
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = s.color;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        });
+      });
+
+      const legendX = padding.left;
+      series.forEach((s, i) => {
+        ctx.fillStyle = s.color;
+        ctx.fillRect(legendX + i * 140, height - 18, 12, 12);
+        ctx.fillStyle = "#475569";
+        ctx.fillText(s.label, legendX + 18 + i * 140, height - 8);
+      });
+    }
+
+    function drawStatusChart(canvas, counts) {
+      const ctx = canvas.getContext("2d");
+      const width = canvas.clientWidth || canvas.width;
+      const height = canvas.clientHeight || canvas.height;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(width * ratio);
+      canvas.height = Math.floor(height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      const data = [
+        { label: "Normal", value: counts.normal || 0, color: "#22c55e" },
+        { label: "Warning", value: counts.warning || 0, color: "#f59e0b" },
+        { label: "Critique", value: counts.critical || 0, color: "#ef4444" },
+      ];
+      const total = data.reduce((s, d) => s + d.value, 0) || 1;
+      const cx = width / 2;
+      const cy = height / 2 - 4;
+      const radius = Math.min(width, height) * 0.27;
+      let start = -Math.PI / 2;
+      data.forEach((d) => {
+        const angle = (d.value / total) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, start + angle);
+        ctx.closePath();
+        ctx.fillStyle = d.color;
+        ctx.fill();
+        start += angle;
+      });
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.62, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+      ctx.fillStyle = "#0f172a";
+      ctx.font = "800 24px Inter, Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(String(total), cx, cy + 6);
+      ctx.font = "12px Inter, Arial";
+      ctx.fillStyle = "#64748b";
+      ctx.fillText("mesures", cx, cy + 24);
+      ctx.textAlign = "left";
+      data.forEach((d, i) => {
+        const x = 18 + i * 96;
+        const y = height - 22;
+        ctx.fillStyle = d.color;
+        ctx.fillRect(x, y - 10, 10, 10);
+        ctx.fillStyle = "#475569";
+        ctx.font = "12px Inter, Arial";
+        ctx.fillText(`${d.label} ${d.value}`, x + 16, y);
+      });
+    }
+
+    function updateCards(data) {
+      const latest = data.latest;
+      const summary = data.summary || {};
+      const display = data.display || {};
+
+      // Ici, le HTML ne devine plus les valeurs : Flask a déjà lu le payload
+      // reçu par /simulation-data et envoie display.* prêt à afficher.
+      if (!latest) {
+        els.globalStatus.textContent = display.globalStatus || "En attente";
+        els.recommendation.textContent = display.recommendation || "Aucune mesure reçue pour ce projet.";
+        els.eventCount.textContent = display.eventCount || summary.totalEvents || 0;
+        els.alertCount.textContent = display.alertCount || 0;
+        els.apiSource.textContent = display.source || "--";
+        els.temperatureValue.textContent = display.temperature || "--";
+        els.humidityValue.textContent = display.humidity || "--";
+        els.pressureValue.textContent = display.pressure || "--";
+        els.mq135Value.textContent = display.mq135 || "--";
+        els.mq2Value.textContent = display.mq2 || "--";
+        els.ledState.textContent = display.leds || "--";
+        els.alertBadge.textContent = display.alertBadge || "0 alerte";
+        return;
+      }
+
+      const status = latest.status || "normal";
+      document.body.dataset.status = status;
+      els.globalStatusCard.dataset.status = status;
+      els.statusOrb.dataset.status = status;
+
+      els.globalStatus.textContent = display.globalStatus || statusLabel(status);
+      els.recommendation.textContent = display.recommendation || latest.recommendation || "Situation normale.";
+      els.eventCount.textContent = display.eventCount || summary.totalEvents || 0;
+      els.alertCount.textContent = display.alertCount || latest.alertsCount || 0;
+      els.apiSource.textContent = display.source || latest.source || "Éditeur / Raspberry Pi 5";
+
+      els.temperatureValue.textContent = display.temperature || formatNumber(latest.temperature, 1);
+      els.humidityValue.textContent = display.humidity || formatNumber(latest.humidity, 1);
+      els.pressureValue.textContent = display.pressure || formatNumber(latest.pressure, 1);
+      els.mq135Value.textContent = display.mq135 || "--";
+      els.mq2Value.textContent = display.mq2 || "--";
+      els.ledState.textContent = display.leds || "--";
+      els.lastUpdate.textContent = display.lastUpdate
+        ? `Dernière mesure : ${labelTime(display.lastUpdate)}`
+        : `Dernière mesure : ${labelTime(latest.datetime || latest.createdAt)}`;
+      els.alertBadge.textContent = display.alertBadge || `${latest.alertsCount || 0} alerte${(latest.alertsCount || 0) > 1 ? "s" : ""}`;
+    }
+
+    function updateAlerts(latest) {
+      const alerts = latest?.alerts || [];
+      if (!alerts.length) {
+        els.alertList.className = "alert-list empty";
+        els.alertList.textContent = "Aucune alerte pour le moment.";
+        return;
+      }
+      els.alertList.className = "alert-list";
+      els.alertList.innerHTML = alerts.map((alert) => `
+        <div class="alert-item ${alert.level === "critical" ? "critical" : "warning"}">
+          <div class="alert-dot"></div>
+          <div>
+            <strong>${alert.sensor || "Capteur"} · ${alert.level === "critical" ? "Critique" : "Pré-alerte"}</strong>
+            <p>${alert.message || "Seuil détecté"}</p>
+            <small>${alert.field || "champ"}${alert.value !== undefined ? " : " + alert.value : ""}</small>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function updateCharts(data) {
+      const history = data.history || [];
+      const last = history.slice(-40);
+      const asChartNumber = (value) => {
+        if (value === null || value === undefined || value === "") return null;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+      };
+      drawLineChart($("temperatureHumidityChart"), [
+        { label: "Température °C", values: last.map(e => asChartNumber(e.temperature)), color: "#ef4444" },
+        { label: "Humidité %", values: last.map(e => asChartNumber(e.humidity)), color: "#0ea5e9" },
+      ]);
+      drawLineChart($("pressureChart"), [
+        { label: "Pression hPa", values: last.map(e => asChartNumber(e.pressure)), color: "#8b5cf6" },
+      ]);
+      drawLineChart($("gasChart"), [
+        { label: "MQ-135 CO₂ ppm", values: last.map(e => asChartNumber(e.mq135Ppm)), color: "#14b8a6" },
+        { label: "MQ-2 fumée ppm", values: last.map(e => asChartNumber(e.mq2Ppm)), color: "#fb7185" },
+      ]);
+      drawStatusChart($("statusChart"), data.summary?.statusCounts || {});
+    }
+
+    function showToast(title, message, level = "warning") {
+      const node = document.createElement("div");
+      node.className = `toast ${level}`;
+      node.innerHTML = `<strong>${title}</strong><span>${message}</span>`;
+      els.toastStack.appendChild(node);
+      setTimeout(() => node.classList.add("visible"), 30);
+      setTimeout(() => {
+        node.classList.remove("visible");
+        setTimeout(() => node.remove(), 350);
+      }, 5200);
+    }
+
+    function maybeNotify(latest) {
+      if (!latest || latest.id === state.lastEventId) return;
+      const isNew = state.lastEventId !== null;
+      state.lastEventId = latest.id;
+      if (!isNew) return;
+      if (latest.status === "normal" && !(latest.alerts || []).length) return;
+
+      const title = latest.status === "critical" ? "Situation critique" : "Pré-alerte détectée";
+      const message = (latest.alerts || [])[0]?.message || latest.recommendation || "Pic détecté sur les capteurs.";
+      showToast(title, message, latest.status === "critical" ? "critical" : "warning");
+
+      if (state.browserNotifications && "Notification" in window && Notification.permission === "granted") {
+        new Notification(title, { body: message });
+      }
+    }
+
+    function applyDashboardData(data, fromStream = false) {
+      if (!data || typeof data !== "object") return;
+      if (data.project) {
+        state.selectedProjectId = String(data.project.id || state.selectedProjectId || "");
+        if (els.projectSelect && els.projectSelect.value !== state.selectedProjectId) {
+          const option = [...els.projectSelect.options].find(o => o.value === state.selectedProjectId);
+          if (option) els.projectSelect.value = state.selectedProjectId;
+        }
+      }
+      state.lastData = data;
+      setConnection(true, fromStream ? "Flux Flask actif" : "Rendu Flask");
+      updateCards(data);
+      updateAlerts(data.latest);
+      updateCharts(data);
+      maybeNotify(data.latest);
+      state.previousLatest = data.latest;
+    }
+
+    function connectDashboardStream() {
+      if (state.stream) {
+        state.stream.close();
+        state.stream = null;
+      }
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = null;
+      }
+
+      const query = state.selectedProjectId ? `?project_id=${encodeURIComponent(state.selectedProjectId)}` : "";
+      const stream = new EventSource(`/dashboard/stream${query}`);
+      state.stream = stream;
+      setConnection(true, "Connexion au flux...");
+
+      stream.addEventListener("dashboard", (event) => {
+        try {
+          const payload = JSON.parse(event.data || "{}");
+          if (!payload.ok) {
+            throw new Error(payload.error || "Flux dashboard invalide");
+          }
+          applyDashboardData(payload.dashboard, true);
+        } catch (error) {
+          console.error(error);
+          setConnection(false, "Erreur flux Flask");
+          els.lastUpdate.textContent = error.message || "Flux invalide";
+        }
+      });
+
+      stream.addEventListener("heartbeat", () => {
+        setConnection(true, "Flux Flask actif");
+      });
+
+      stream.onerror = () => {
+        setConnection(false, "Flux coupé");
+        els.lastUpdate.textContent = "Reconnexion automatique au flux Flask...";
+        stream.close();
+        if (!state.reconnectTimer) {
+          state.reconnectTimer = setTimeout(() => {
+            state.reconnectTimer = null;
+            connectDashboardStream();
+          }, 1800);
+        }
+      };
+    }
+
+    $("refreshNow").addEventListener("click", () => {
+      // Pas de fetch : on rouvre simplement le flux Flask, qui renvoie l'état serveur.
+      connectDashboardStream();
+    });
+
+    $("enableNotifications").addEventListener("click", async () => {
+      if (!("Notification" in window)) {
+        showToast("Notifications indisponibles", "Le navigateur ne supporte pas les notifications système.", "warning");
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      state.browserNotifications = permission === "granted";
+      showToast("Notifications", state.browserNotifications ? "Notifications système activées." : "Permission refusée.", state.browserNotifications ? "normal" : "warning");
+    });
+
+    els.projectSelect.addEventListener("change", () => {
+      state.selectedProjectId = els.projectSelect.value || null;
+      state.lastEventId = null;
+      connectDashboardStream();
+    });
+
+    window.addEventListener("resize", () => {
+      if (state.lastData) updateCharts(state.lastData);
+    });
+
+    (function start() {
+      if (els.projectSelect && els.projectSelect.value) {
+        state.selectedProjectId = els.projectSelect.value;
+      }
+      applyDashboardData(INITIAL_DASHBOARD_DATA, false);
+      connectDashboardStream();
+    })();
+  </script>
+</body>
+</html>

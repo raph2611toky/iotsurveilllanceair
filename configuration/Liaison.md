@@ -1,34 +1,42 @@
 ```text
 DHT22
-VCC  → 3.3V ou 5V
+VCC  → Breadboard F10 
 DATA → GPIO4
-GND  → GND
+GND  → Breadboard D5
+
 
 MQ-135
-VCC  → 5V
-GND  → GND
+VCC  → Breadboard F7
+GND  → Breadboard E1
 DOUT → GPIO17
-AOUT → ADC externe, pas directement Raspberry Pi
+AOUT → 
+
+
 
 MQ-2
-VCC  → 5V
-GND  → GND
+VCC  → Breadboard F4
+GND  → Breadboard E2
 DOUT → GPIO27
-AOUT → ADC externe, pas directement Raspberry Pi
+AOUT → 
+
+
 
 BMP280
-VCC → 3.3V
-GND → GND
-SDA → GPIO2 SDA
-SCL → GPIO3 SCL
+VCC → Breadboard F15 
+GND → Breadboard E7
+SDA → Breadboard A3 
+SCL → Breadboard B4
+
 
 OLED I2C
-VCC → 3.3V
-GND → GND
-SDA → GPIO2 SDA
-SCL → GPIO3 SCL
+VCC → Breadboard F30
+GND → Breadboard E24
+SDA → Breadboard A7 
+SCL → Breadboard B8 
 
-Buzzer
-+   → GPIO18 ou GPIO23
--   → GND
+Breadboard → Raspberry pi
+F13 → Vcc 5V
+E13 → GND
+A1 → GPIO2 SDA
+B1 → GPIO3 SCL
 ```

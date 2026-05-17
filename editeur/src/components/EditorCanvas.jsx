@@ -133,6 +133,48 @@ function isRightButton(event) {
   return event.button === 2;
 }
 
+function distanceToSegment(point, segmentStart, segmentEnd) {
+  const dx = segmentEnd.x - segmentStart.x;
+  const dy = segmentEnd.y - segmentStart.y;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared === 0) {
+    return Math.hypot(point.x - segmentStart.x, point.y - segmentStart.y);
+  }
+
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point.x - segmentStart.x) * dx + (point.y - segmentStart.y) * dy) / lengthSquared
+    )
+  );
+
+  const projection = {
+    x: segmentStart.x + t * dx,
+    y: segmentStart.y + t * dy,
+  };
+
+  return Math.hypot(point.x - projection.x, point.y - projection.y);
+}
+
+function findNearestSegmentIndex(point, points) {
+  if (points.length < 2) return 0;
+
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const distance = distanceToSegment(point, points[index], points[index + 1]);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+
+  return bestIndex;
+}
+
 
 function isVoltageName(value = "") {
   const text = String(value).toUpperCase();
@@ -793,39 +835,58 @@ export default function EditorCanvas({
     rightClickMemory.current = { wireId, time: now };
   }
 
-  function startMoveWholeWire(event, wire) {
+  function startBendWireAt(event, wire, resolvedPoints) {
     if (!isLeftButton(event)) return;
 
     event.preventDefault();
     event.stopPropagation();
 
     const startPoint = getCanvasPoint(event);
-    const initialPoints = wire.points || [];
+    const currentPoints = [...(wire.points || [])];
+    const segmentIndex = findNearestSegmentIndex(startPoint, resolvedPoints);
+    const insertIndex = Math.max(0, Math.min(segmentIndex, currentPoints.length));
+
+    const nextPoints = [...currentPoints];
+    nextPoints.splice(insertIndex, 0, startPoint);
 
     setDraggingWireId(wire.id);
+    setDraggingPoint({
+      wireId: wire.id,
+      pointIndex: insertIndex,
+    });
+
+    setWires((previous) =>
+      previous.map((currentWire) =>
+        currentWire.id === wire.id
+          ? {
+              ...currentWire,
+              points: nextPoints,
+            }
+          : currentWire
+      )
+    );
 
     function onMove(moveEvent) {
       const movePoint = getCanvasPoint(moveEvent);
-      const dx = movePoint.x - startPoint.x;
-      const dy = movePoint.y - startPoint.y;
 
       setWires((previous) =>
-        previous.map((currentWire) =>
-          currentWire.id === wire.id
-            ? {
-                ...currentWire,
-                points: initialPoints.map((point) => ({
-                  x: point.x + dx,
-                  y: point.y + dy,
-                })),
-              }
-            : currentWire
-        )
+        previous.map((currentWire) => {
+          if (currentWire.id !== wire.id) return currentWire;
+
+          const points = [...(currentWire.points || [])];
+          points[insertIndex] = movePoint;
+
+          return {
+            ...currentWire,
+            points,
+          };
+        })
       );
     }
 
     function onUp() {
       setDraggingWireId(null);
+      setDraggingPoint(null);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     }
@@ -1091,7 +1152,7 @@ export default function EditorCanvas({
                 strokeWidth="34"
                 fill="none"
                 className="wire-hit-area"
-                onMouseDown={(event) => startMoveWholeWire(event, wire)}
+                onMouseDown={(event) => startBendWireAt(event, wire, points)}
                 onContextMenu={(event) => handleWireRightDoubleClick(event, wire.id)}
               />
 
@@ -1103,7 +1164,7 @@ export default function EditorCanvas({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className="wire-path"
-                onMouseDown={(event) => startMoveWholeWire(event, wire)}
+                onMouseDown={(event) => startBendWireAt(event, wire, points)}
                 onContextMenu={(event) => handleWireRightDoubleClick(event, wire.id)}
               />
 
