@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Alerte critique qualité de l'air</title>
+</head>
+<body style="margin:0;background:#f5f8fb;font-family:Inter,Arial,sans-serif;color:#0f172a;">
+  <div style="max-width:760px;margin:0 auto;padding:28px;">
+    <div style="background:linear-gradient(135deg,#ef4444,#f97316);border-radius:24px;padding:26px;color:#fff;box-shadow:0 18px 45px rgba(239,68,68,.22);">
+      <p style="margin:0 0 8px;text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:800;">Surveillance qualité de l'air</p>
+      <h1 style="margin:0;font-size:30px;line-height:1.15;">Alerte critique détectée</h1>
+      <p style="margin:12px 0 0;opacity:.92;">Une ou plusieurs valeurs de capteurs ont dépassé le seuil critique.</p>
+    </div>
+
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:24px;margin-top:18px;padding:24px;box-shadow:0 18px 50px rgba(15,23,42,.08);">
+      <h2 style="margin:0 0 12px;font-size:18px;">Projet</h2>
+      <p style="margin:0;color:#475569;">#{{ project.id if project else '--' }} · {{ project.name if project else 'Projet inconnu' }}</p>
+      <p style="margin:6px 0 0;color:#64748b;font-size:13px;">Dernière mesure : {{ display.lastUpdate if display else '--' }}</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:18px;">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:18px;padding:18px;"><span style="color:#64748b;font-size:12px;font-weight:800;">Température</span><h3 style="margin:6px 0 0;font-size:24px;">{{ display.temperature if display else '--' }} °C</h3></div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:18px;padding:18px;"><span style="color:#64748b;font-size:12px;font-weight:800;">Humidité</span><h3 style="margin:6px 0 0;font-size:24px;">{{ display.humidity if display else '--' }} %</h3></div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:18px;padding:18px;"><span style="color:#64748b;font-size:12px;font-weight:800;">Pression</span><h3 style="margin:6px 0 0;font-size:24px;">{{ display.pressure if display else '--' }} hPa</h3></div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:18px;padding:18px;"><span style="color:#64748b;font-size:12px;font-weight:800;">LEDs</span><h3 style="margin:6px 0 0;font-size:18px;">{{ display.leds if display else '--' }}</h3></div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:18px;padding:18px;"><span style="color:#64748b;font-size:12px;font-weight:800;">MQ-135</span><h3 style="margin:6px 0 0;font-size:20px;">{{ display.mq135 if display else '--' }}</h3></div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:18px;padding:18px;"><span style="color:#64748b;font-size:12px;font-weight:800;">MQ-2</span><h3 style="margin:6px 0 0;font-size:20px;">{{ display.mq2 if display else '--' }}</h3></div>
+    </div>
+
+    <div style="background:#fff;border:1px solid #fecaca;border-radius:24px;margin-top:18px;padding:24px;">
+      <h2 style="margin:0 0 12px;font-size:18px;color:#dc2626;">Détails de l'alerte</h2>
+      {% if alerts %}
+        {% for alert in alerts %}
+          <div style="border-left:4px solid #ef4444;padding:10px 0 10px 14px;margin-bottom:10px;background:#fff7f7;">
+            <strong>{{ alert.sensor or 'Capteur' }} · {{ alert.level or 'critical' }}</strong>
+            <p style="margin:4px 0;color:#475569;">{{ alert.message or 'Seuil critique détecté.' }}</p>
+            <small style="color:#64748b;">{{ alert.field or 'valeur' }}{% if alert.value is defined %} : {{ alert.value }}{% endif %}</small>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p style="margin:0;color:#475569;">{{ message }}</p>
+      {% endif %}
+      <p style="margin:16px 0 0;color:#0f172a;font-weight:700;">{{ display.recommendation if display else 'Vérifier immédiatement la zone.' }}</p>
+    </div>
+
+    <p style="text-align:center;color:#64748b;font-size:13px;margin-top:18px;">
+      Dashboard : <a href="{{ dashboard_url }}" style="color:#0f766e;">{{ dashboard_url }}</a>
+    </p>
+  </div>
+</body>
+</html>

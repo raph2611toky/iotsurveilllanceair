@@ -213,7 +213,7 @@
     const state = {
       selectedProjectId: ACTIVE_PROJECT_ID ? String(ACTIVE_PROJECT_ID) : null,
       lastEventId: null,
-      browserNotifications: false,
+      browserNotifications: localStorage.getItem("airDashboardBrowserNotifications") === "on",
       previousLatest: null,
       lastData: null,
       stream: null,
@@ -510,6 +510,14 @@
       }, 5200);
     }
 
+    function updateNotificationButton() {
+      const button = $("enableNotifications");
+      if (!button) return;
+      button.textContent = state.browserNotifications ? "Désactiver notifications" : "Activer notifications";
+      button.classList.toggle("notification-active", state.browserNotifications);
+      button.setAttribute("aria-pressed", state.browserNotifications ? "true" : "false");
+    }
+
     function maybeNotify(latest) {
       if (!latest || latest.id === state.lastEventId) return;
       const isNew = state.lastEventId !== null;
@@ -600,8 +608,19 @@
         showToast("Notifications indisponibles", "Le navigateur ne supporte pas les notifications système.", "warning");
         return;
       }
+
+      if (state.browserNotifications) {
+        state.browserNotifications = false;
+        localStorage.setItem("airDashboardBrowserNotifications", "off");
+        updateNotificationButton();
+        showToast("Notifications", "Notifications système désactivées.", "normal");
+        return;
+      }
+
       const permission = await Notification.requestPermission();
       state.browserNotifications = permission === "granted";
+      localStorage.setItem("airDashboardBrowserNotifications", state.browserNotifications ? "on" : "off");
+      updateNotificationButton();
       showToast("Notifications", state.browserNotifications ? "Notifications système activées." : "Permission refusée.", state.browserNotifications ? "normal" : "warning");
     });
 
@@ -619,6 +638,7 @@
       if (els.projectSelect && els.projectSelect.value) {
         state.selectedProjectId = els.projectSelect.value;
       }
+      updateNotificationButton();
       applyDashboardData(INITIAL_DASHBOARD_DATA, false);
       connectDashboardStream();
     })();

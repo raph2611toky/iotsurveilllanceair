@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -14,6 +15,14 @@ from typing import Any
 
 from flask import Flask, Response, jsonify, request, render_template, send_from_directory, stream_with_context
 from flask_cors import CORS
+
+try:
+    from utils import send_email_notification
+except Exception as exc:  # Le dashboard doit rester disponible même si l'email est mal configuré.
+    send_email_notification = None
+    EMAIL_UTILS_IMPORT_ERROR = exc
+else:
+    EMAIL_UTILS_IMPORT_ERROR = None
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "iot_projects.sqlite3"
@@ -335,6 +344,7 @@ def update_project(project_id: int):
     # Mise à jour instantanée du template dashboard si le PUT contenait des valeurs de capteurs.
     if has_sensor_measurements(data):
         publish_dashboard_update(project_id)
+        handle_critical_email_notification(project_id)
 
     return jsonify(row_to_project(row))
 
@@ -401,6 +411,8 @@ def receive_project_simulation_data(project_id: int):
 
     # Dès réception d'une mesure, Flask pousse les nouvelles valeurs vers le template.
     publish_dashboard_update(project_id)
+    # Si l'état vient de passer en critique, Flask envoie aussi l'email d'alerte.
+    handle_critical_email_notification(project_id)
 
     return jsonify({
         "ok": True,
@@ -1056,6 +1068,132 @@ def make_display_payload(dashboard: dict[str, Any]) -> dict[str, Any]:
         "lastUpdate": latest.get("datetime") or latest.get("createdAt") or "--",
         "alertBadge": f"{alerts_count} alerte" + ("s" if alerts_count > 1 else ""),
     }
+
+
+
+
+def email_alerts_enabled() -> bool:
+    value = os.getenv("EMAIL_ALERT_ENABLED", "true").strip().lower()
+    return value not in {"0", "false", "no", "non", "off"}
+
+
+def build_critical_email_message(project: dict[str, Any], latest: dict[str, Any], display: dict[str, Any]) -> str:
+    alerts = latest.get("alerts") if isinstance(latest.get("alerts"), list) else []
+    alert_lines = []
+    for alert in alerts:
+        sensor = alert.get("sensor") or "Capteur"
+        message = alert.get("message") or "Seuil critique détecté"
+        value = alert.get("value")
+        field = alert.get("field") or "valeur"
+        suffix = f" ({field}: {value})" if value not in (None, "") else ""
+        alert_lines.append(f"- {sensor}: {message}{suffix}")
+
+    if not alert_lines:
+        alert_lines.append("- Situation critique détectée par le système de surveillance.")
+
+    return "\n".join([
+        "ALERTE CRITIQUE - Surveillance qualité de l'air",
+        "",
+        f"Projet : #{project.get('id')} · {project.get('name')}",
+        f"Date/heure : {display.get('lastUpdate') or latest.get('datetime') or latest.get('createdAt')}",
+        f"État global : {display.get('globalStatus') or latest.get('status')}",
+        "",
+        "Valeurs reçues :",
+        f"- Température : {display.get('temperature', '--')} °C",
+        f"- Humidité : {display.get('humidity', '--')} %",
+        f"- Pression : {display.get('pressure', '--')} hPa",
+        f"- MQ-135 : {display.get('mq135', '--')}",
+        f"- MQ-2 : {display.get('mq2', '--')}",
+        f"- LEDs : {display.get('leds', '--')}",
+        "",
+        "Alertes :",
+        *alert_lines,
+        "",
+        f"Recommandation : {display.get('recommendation') or latest.get('recommendation') or 'Vérifier immédiatement la zone.'}",
+    ])
+
+
+def handle_critical_email_notification(project_id: int | None, dashboard: dict[str, Any] | None = None) -> None:
+    """Envoie un email uniquement quand l'état devient critique.
+
+    Le but est d'éviter un email toutes les 2 secondes lorsque le capteur reste
+    critique. On mémorise le dernier état critique dans editor_state.
+    """
+    if project_id is None or not email_alerts_enabled():
+        return
+
+    if dashboard is None:
+        dashboard, status = build_dashboard_data(project_id, limit=80)
+        if status != 200:
+            return
+
+    latest = dashboard.get("latest") if isinstance(dashboard.get("latest"), dict) else None
+    project = dashboard.get("project") if isinstance(dashboard.get("project"), dict) else {"id": project_id, "name": "Projet"}
+    display = dashboard.get("display") if isinstance(dashboard.get("display"), dict) else make_display_payload(dashboard)
+
+    if not latest:
+        return
+
+    current_status = str(latest.get("status") or "normal").lower()
+    current_event_id = str(latest.get("id") or "")
+    state_key = f"email_critical_alert_project_{project_id}"
+    previous_state = get_state(state_key, {}) or {}
+    previous_status = str(previous_state.get("lastStatus") or "").lower()
+
+    base_state = {
+        "lastStatus": current_status,
+        "lastEventId": current_event_id,
+        "updatedAt": now_iso(),
+    }
+
+    if current_status != "critical":
+        set_state(state_key, {**previous_state, **base_state})
+        return
+
+    # On envoie seulement au moment où l'état devient critique.
+    if previous_status == "critical":
+        set_state(state_key, {**previous_state, **base_state})
+        return
+
+    if send_email_notification is None:
+        set_state(state_key, {
+            **previous_state,
+            **base_state,
+            "lastEmailOk": False,
+            "lastEmailError": f"utils.py non chargé: {EMAIL_UTILS_IMPORT_ERROR}",
+        })
+        return
+
+    message = build_critical_email_message(project, latest, display)
+    subject = f"ALERTE CRITIQUE · Qualité de l'air · Projet #{project.get('id')}"
+    context = {
+        "project": project,
+        "latest": latest,
+        "display": display,
+        "alerts": latest.get("alerts") or [],
+        "dashboard_url": os.getenv("DASHBOARD_URL", "http://127.0.0.1:5000/dashboard"),
+    }
+
+    try:
+        result = send_email_notification(message=message, subject=subject, context=context)
+        set_state(state_key, {
+            **base_state,
+            "lastStatusBeforeSend": previous_status or "normal",
+            "lastCriticalEventId": current_event_id,
+            "lastEmailOk": True,
+            "lastEmailSentAt": now_iso(),
+            "lastEmailResult": result,
+        })
+        print(f"[EMAIL] Alerte critique envoyée pour le projet {project_id} vers {result.get('recipient')}")
+    except Exception as exc:
+        set_state(state_key, {
+            **base_state,
+            "lastCriticalEventId": current_event_id,
+            "lastEmailOk": False,
+            "lastEmailError": str(exc),
+            "lastEmailFailedAt": now_iso(),
+        })
+        print(f"[EMAIL] Échec envoi alerte critique projet {project_id}: {exc}")
 
 
 def compact_dashboard_event(event: dict[str, Any] | None) -> dict[str, Any] | None:

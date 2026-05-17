@@ -633,3 +633,10 @@ canvas {
   .side-nav { grid-template-columns: 1fr 1fr; }
   .status-card { flex-direction: column; align-items: flex-start; }
 }
+
+.ghost-btn.notification-active {
+  background: rgba(34, 197, 94, .12);
+  color: #0f766e;
+  border-color: rgba(34, 197, 94, .35);
+  box-shadow: 0 14px 30px rgba(34, 197, 94, .12);
+}
